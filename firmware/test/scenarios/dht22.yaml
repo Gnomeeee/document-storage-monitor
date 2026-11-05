@@ -1,0 +1,33 @@
+name: DHT22 readings, updates, and humidity recovery
+version: 1
+author: Document Storage Monitor
+steps:
+  - wait-serial: 'DHT22 driver: Adafruit 1.4.7'
+  - wait-serial: 'Temperature: 28.0 C'
+  - wait-serial: 'Humidity: 50.0 %'
+  - wait-serial: 'STATUS: NORMAL'
+  # A second real sample catches the old persistent TIMEOUT regression.
+  - wait-serial: 'Temperature: 28.0 C'
+  - wait-serial: 'Humidity: 50.0 %'
+  - set-control:
+      part-id: dht
+      name: temperature
+      value: 31.5
+  - set-control:
+      part-id: dht
+      name: humidity
+      value: 65
+  - wait-serial: 'Temperature: 31.5 C'
+  - wait-serial: 'Humidity: 65.0 %'
+  - wait-serial: 'ALARM: High humidity detected!'
+  - set-control:
+      part-id: dht
+      name: temperature
+      value: -5.5
+  - set-control:
+      part-id: dht
+      name: humidity
+      value: 45
+  - wait-serial: 'Temperature: -5.5 C'
+  - wait-serial: 'Humidity: 45.0 %'
+  - wait-serial: 'STATUS: NORMAL'

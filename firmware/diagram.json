@@ -1,0 +1,132 @@
+﻿{
+  "version": 1,
+  "author": "Document storage monitor",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {
+        "frequency": "240"
+      }
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht",
+      "top": -30,
+      "left": 350,
+      "attrs": {
+        "temperature": "28",
+        "humidity": "50"
+      }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "buzzer",
+      "top": 170,
+      "left": 350,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-slide-switch",
+      "id": "water",
+      "top": 330,
+      "left": 350,
+      "attrs": {
+        "value": "1",
+        "bounce": "0"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "title",
+      "top": -160,
+      "left": 0,
+      "attrs": {
+        "text": "DOCUMENT STORAGE MONITOR - local sensor prototype"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "power",
+      "top": -100,
+      "left": 0,
+      "attrs": {
+        "text": "USB data cable + regulated 5V USB adapter\nPhysical accessories; simulator powers board"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "dhtLabel",
+      "top": -100,
+      "left": 350,
+      "attrs": {
+        "text": "DHT22 - air temperature / humidity\nClick sensor to change readings"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "buzzerLabel",
+      "top": 120,
+      "left": 350,
+      "attrs": {
+        "text": "Audible alarm - GPIO 26\nPiezo substitutes for active buzzer module"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "waterLabel",
+      "top": 280,
+      "left": 350,
+      "attrs": {
+        "text": "Water probe substitute - GPIO 27\nSlide switch: grounded = WET"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "install",
+      "top": 460,
+      "left": 0,
+      "attrs": {
+        "text": "PHYSICAL INSTALLATION ITEMS\nProtective enclosure + mounting materials\nKeep ESP32 elevated and dry"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "validation",
+      "top": 460,
+      "left": 420,
+      "attrs": {
+        "text": "PHYSICAL VALIDATION ITEMS\nReference hygrometer + test tray / dropper\nNot simulated measurement instruments"
+      }
+    },
+    {
+      "type": "wokwi-text",
+      "id": "breadLabel",
+      "top": 590,
+      "left": 0,
+      "attrs": {
+        "text": "Breadboard / jumper kit - layout reference\nCircuit uses direct jumper connections above"
+      }
+    },
+    {
+      "type": "wokwi-breadboard",
+      "id": "breadboard",
+      "top": 660,
+      "left": 0,
+      "attrs": {}
+    }
+  ],
+  "connections": [
+    ["esp:3V3", "dht:VCC", "red", []],
+    ["esp:GND.1", "dht:GND", "black", []],
+    ["esp:4", "dht:SDA", "green", []],
+    ["esp:26", "buzzer:2", "blue", []],
+    ["esp:GND.1", "buzzer:1", "black", []],
+    ["esp:27", "water:2", "purple", []],
+    ["esp:GND.1", "water:1", "black", []]
+  ],
+  "dependencies": {}
+}
