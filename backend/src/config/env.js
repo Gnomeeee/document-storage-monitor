@@ -1,8 +1,11 @@
 import { config } from "dotenv";
 import { z } from "zod";
+
 config({ quiet: true });
+
 const positive = (fallback) =>
   z.coerce.number().int().positive().default(fallback);
+
 const schema = z.object({
   DATABASE_URL: z
     .string()
@@ -31,6 +34,7 @@ const schema = z.object({
   GAP_AFTER_MS: positive(180000),
   MAX_CONNECTIONS: positive(30),
 });
+
 export function loadEnv(source = process.env) {
   const parsed = schema.safeParse(source);
   if (!parsed.success)
@@ -57,6 +61,7 @@ export function loadEnv(source = process.env) {
     throw new Error("OFFLINE_AFTER_MS must exceed STALE_AFTER_MS.");
   return env;
 }
+
 export function alertRules(env) {
   return {
     warningMs: env.WARNING_AFTER_MS,

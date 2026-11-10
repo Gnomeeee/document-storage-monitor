@@ -1,5 +1,6 @@
 import { PrismaClient } from "../generated/prisma/index.js";
 import { PrismaPg } from "@prisma/adapter-pg";
+
 export function createPrisma(databaseUrl) {
   const url = new URL(databaseUrl);
   const schema = url.searchParams.get("schema") ?? "public";
