@@ -1,0 +1,5 @@
+user dsms_backend
+topic read dsms/+/readings
+
+user DOC-ROOM-01
+topic write dsms/DOC-ROOM-01/readings

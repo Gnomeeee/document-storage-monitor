@@ -4,3 +4,7 @@ node_modules
 !.env.example
 
 /src/generated/prisma
+
+/broker/passwords
+/broker/*.key
+/broker/*.pem
