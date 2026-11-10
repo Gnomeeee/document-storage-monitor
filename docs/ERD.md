@@ -1,119 +1,66 @@
-# DSMS — Entity Relationship Diagram (ERD)
+# DSMS entity relationship diagram
 
-**Project:** ESP32-Based Early-Warning System for Humidity and Water Intrusion in School Document Storage Areas
-**Status:** Version 1 logical data model (three core tables).
-**Database:** PostgreSQL; ORM: Prisma.
-**Scope:** One ESP32, one monitoring area, environmental telemetry and alerts.
-
-## Version 1 — Core ERD
+Aligned with `backend/prisma/schema.prisma`. Three entities support the agreed monitoring features; MQTT/broker and WebSocket are communication infrastructure, not database entities. No staff-account or expansion model is included.
 
 ```mermaid
 erDiagram
-    DEVICE ||--o{ SENSOR_READING : records
-    DEVICE ||--o{ ALERT : generates
-
-    DEVICE {
-        uuid id PK
-        string device_code UK
+    Device ||--o{ SensorReading : produces
+    Device ||--o{ Alert : generates
+    Device {
+        int id PK
+        string deviceCode UK
         string name
         string location
-        string api_key_hash
-        boolean is_active
-        datetime created_at
+        boolean isActive
+        datetime createdAt
+        datetime updatedAt
     }
-
-    SENSOR_READING {
-        uuid id PK
-        uuid device_id FK
-        float temperature_c
-        float humidity_percent
-        boolean water_detected
-        string reading_uid "optional"
-        datetime received_at
+    SensorReading {
+        int id PK
+        int deviceId FK
+        float temperatureC
+        float humidityPercent
+        boolean waterDetected
+        string readingUid "nullable"
+        datetime receivedAt
     }
-
-    ALERT {
-        uuid id PK
-        uuid device_id FK
+    Alert {
+        int id PK
+        int deviceId FK
         string type "HUMIDITY or WATER"
         string severity "WARNING or CRITICAL"
         string status "OPEN or CLEARED"
         string message
-        datetime started_at
-        datetime cleared_at "nullable"
-        datetime acknowledged_at "later"
+        datetime startedAt
+        datetime clearedAt "nullable"
     }
 ```
 
-## Relationship explanation
+## Identity and relationships
 
-- **DEVICE 1 : 0..many SENSOR_READING** — each reading comes from exactly one ESP32 device, while a device may produce zero or thousands of measurements.
-- **DEVICE 1 : 0..many ALERT** — each alert is associated with exactly one ESP32 device; a device may have multiple incidents over time.
-- There is deliberately **no direct SENSOR_READING-to-ALERT foreign key**: an alert is the result of a _period of readings_ (humidity) or a wet-sensor state and belongs to its device. A particular alert may be caused by several readings rather than one.
+- All three primary keys are auto-incrementing integers. Child deviceId fields reference Device.id with restrictive deletion.
+- Device.deviceCode is unique, e.g. DOC-ROOM-01. MQTT payload deviceId is this public code; the backend checks it against the authorized topic and resolves the integer foreign key.
+- Device.isActive enables/disables ingestion; connectivity is derived separately from reading freshness.
+- No apiKeyHash field: the chosen broker owns its authentication configuration. A device code is not a credential. PostgreSQL credentials belong to backend configuration only.
+- An incident can span many readings, so Alert relates to Device rather than one SensorReading.
+- DateTime fields use TIMESTAMPTZ(3); createdAt/receivedAt/startedAt default to now. Device.updatedAt is maintained by Prisma. clearedAt is null until recovery.
 
-## Primary and foreign keys
+## Constraints and migration status
 
-| Entity         | Key                                | Note                                                                         |
-| -------------- | ---------------------------------- | ---------------------------------------------------------------------------- |
-| DEVICE         | `id` primary; `device_code` unique | `device_code` (e.g., `DOC-ROOM-01`) is exposed as `deviceId` in API requests |
-| SENSOR_READING | `id` primary; `device_id` foreign  | Optional `(device_id, reading_uid)` unique pair for retry deduplication      |
-| ALERT          | `id` primary; `device_id` foreign  | Prevent more than one `OPEN` alert per `(device_id, type)`                   |
+The current schema and initial migration `20261110104250_database_connection` include:
 
-## Proposed database constraints
+- Unique deviceCode.
+- Unique (deviceId, readingUid). Null readingUid does not provide deduplication; MQTT producers should supply a stable ID per measurement and reuse it on retries.
+- Indexes on (deviceId, receivedAt) and (deviceId, startedAt).
+- Foreign keys with ON DELETE RESTRICT.
 
-1. `humidity_percent` between 0 and 100, and `temperature_c` must be finite and sensor-plausible.
-2. `type` is `HUMIDITY` or `WATER`; `severity` is `WARNING` or `CRITICAL`; `status` is `OPEN` or `CLEARED`.
-3. `cleared_at` is nullable while status is `OPEN`, and should be set when status becomes `CLEARED`.
-4. Index `(device_id, received_at DESC)` for readings and `(device_id, started_at DESC)` for alerts.
-5. Use a partial unique database index (or a suitable transaction and locking strategy) to prevent two open alerts with the same `(device_id, type)`.
-6. The physical database schema/migrations are the final source of truth; Mermaid is an editable visualization and does not generate the database automatically.
+Still required in a follow-up migration/service implementation:
 
-## Later extension — Authenticated staff acknowledgment
+1. At most one OPEN alert per (deviceId, type), enforced with a partial unique index. A general unique index on (deviceId, type, status) would wrongly restrict cleared history.
+2. Finite/range validation for measurements, including humidity 0..100, with database checks as appropriate.
+3. Status/clearedAt consistency: OPEN has no clearance timestamp, CLEARED has one; clearance cannot precede start.
+4. Atomic reading/incident changes and safe deduplication under concurrent delivery.
 
-Only use this extension if the team adds staff login and protects `PATCH /api/v1/alerts/:id/acknowledge`.
+The migration file exists; this document does not claim it has been applied to a particular database. Preserve already-applied migrations; add new constraints through a new migration. The Mermaid diagram does not execute SQL.
 
-```mermaid
-erDiagram
-    DEVICE ||--o{ SENSOR_READING : records
-    DEVICE ||--o{ ALERT : generates
-    OPERATOR |o--o{ ALERT : acknowledges
-
-    DEVICE {
-        uuid id PK
-        string device_code UK
-        string name
-        string location
-        string api_key_hash
-        boolean is_active
-        datetime created_at
-    }
-    SENSOR_READING {
-        uuid id PK
-        uuid device_id FK
-        float temperature_c
-        float humidity_percent
-        boolean water_detected
-        datetime received_at
-    }
-    ALERT {
-        uuid id PK
-        uuid device_id FK
-        uuid acknowledged_by_id FK "nullable"
-        string type
-        string severity
-        string status
-        datetime started_at
-        datetime cleared_at
-        datetime acknowledged_at
-    }
-    OPERATOR {
-        uuid id PK
-        string name
-        string email UK
-        string password_hash
-        boolean is_active
-        datetime created_at
-    }
-```
-
-For the MVP, **use the first, three-entity diagram**. It matches the simplified project scope and does not require login before sensor monitoring works.
+See [communication contracts](COMMUNICATION.md), [SRS](SRS.md), and [development guide](DEVELOPMENT_GUIDE.md).

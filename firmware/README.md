@@ -3,9 +3,17 @@
 This is the local sensor learning prototype, not the completed SRS implementation.
 It reads the DHT22, interprets a switch as a digital water probe, and sounds a
 buzzer for water or immediate RH >= 60%. Water alarms remain usable on DHT failure.
-Wi-Fi/API ingestion, timed humidity qualification, debounce, and recovery timers
+Wi-Fi/MQTT publication, timed humidity qualification, debounce, and recovery timers
 are still future work. DHT reads are scheduled every 2.5 seconds while water is
 checked between readings, including during the two-second sensor startup period.
+
+## Planned communication
+
+The selected device path is ESP32 -> MQTT broker -> backend; React communicates
+with the backend through WebSocket. Firmware networking is not implemented yet.
+See [communication contracts](../docs/COMMUNICATION.md) for the proposed topic,
+payload, broker authentication, deduplication and failure behavior. Preserve
+local monitoring during broker/network outages. No HTTP sensor upload is planned.
 
 ## Structure
 

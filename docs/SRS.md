@@ -6,14 +6,14 @@
 |---|---|
 | Document type | Software Requirements Specification (SRS) |
 | Document ID | SRS-DSMS-001 |
-| Version | 1.0 — Baseline Draft for Team Review |
-| Date | November 5, 2026 |
+| Revision | 1.1 - Communication architecture aligned |
+| Date | November 10, 2026 |
 | Project acronym | DSMS (Document Storage Monitoring System) |
 | Deployment | One school document-storage area; one ESP32 prototype |
-| Technology | ESP32 + DHT22 + water sensor + buzzer; React/Vite; Node.js/Express REST API; PostgreSQL/Prisma |
+| Technology | ESP32 + DHT22 + water sensor + buzzer; React/Vite; Node.js/Express with MQTT and WebSocket; PostgreSQL/Prisma |
 | Status | Draft: implementation details and acceptance targets require team/instructor approval |
 
-> **Requirement status key:** **Baseline** = carried forward from the group's visual project guide; **Proposed** = implementation decision added to make the requirements testable; **Later** = explicitly excluded from the first working release. All times, thresholds, performance targets, and policies marked *Proposed* must be approved or revised during design review. This document describes the intended system; it does not claim the system has already been implemented, validated, or approved by a school.
+> **Requirement status key:** **Baseline** = carried forward from the group's visual project guide; **Proposed** = implementation decision added to make the requirements testable; **Excluded** = outside the agreed system. All times, thresholds, performance targets, and policies marked *Proposed* must be approved or revised during design review. This document describes the intended system; it does not claim the system has already been implemented, validated, or approved by a school.
 
 ---
 
@@ -21,11 +21,14 @@
 
 | Revision | Date | Summary | Approval |
 |---|---|---|---|
-| 1.0 | 2026-11-05 | Initial detailed SRS drafted from the supplied visual guide and subsequent development discussions | Pending |
+| 1.0 | 2026-11-05 | Original baseline draft | Pending |
+| 1.1 | 2026-11-10 | MQTT/broker and WebSocket selected; schema alignment | Transport agreed; detailed contracts proposed |
 
-**Primary project source:** *ESP32 Document Storage Monitoring — Full Visual Guide* (November 2026), itself based on the group's original *Early-Warning System for Humidity and Water Intrusion in School Document Storage Areas* draft. The source established the project scope, four core functions, ESP32-only controller, component list, basic architecture, proposed alert rules, three database models, endpoints, and research objectives. Details not fixed by that guide are labeled *Proposed* or *Later* here.
+**Primary project source:** *ESP32 Document Storage Monitoring — Full Visual Guide* (November 2026), itself based on the group's original *Early-Warning System for Humidity and Water Intrusion in School Document Storage Areas* draft. The source established the project scope, four core functions, ESP32-only controller, component list, basic architecture, proposed alert rules, three database models, endpoints, and research objectives. Details not fixed by that guide are labeled *Proposed* or excluded here.
 
 **Approval responsibilities (to fill in):** Project group: __________; Faculty adviser/instructor: __________; Target storage-area representative: __________.
+
+> Current communication contracts: [COMMUNICATION.md](COMMUNICATION.md). Transport selection is agreed; topic names, event names and QoS details are proposed. Features and warning thresholds are unchanged.
 
 ## 1. Introduction
 
@@ -39,25 +42,25 @@ Schools retain paper records such as student files, certificates, enrollment doc
 
 ### 1.3 Product scope
 
-**In scope — Version 1 (Baseline):**
+**In scope - agreed system:**
 
 1. Monitor air temperature and relative humidity near one document-storage location using one DHT22 sensor connected to one ESP32.
 2. Detect water contacting a water-sensor plate installed near a plausible leak point.
 3. Apply local warning rules and operate an audible buzzer even if Wi-Fi is temporarily unavailable.
-4. Upload readings via Wi-Fi and HTTP to a Node.js/Express REST API.
+4. Publish readings via Wi-Fi/MQTT to a broker subscribed to by the Node.js/Express backend.
 5. Validate, persist, and retrieve readings in PostgreSQL through a data-access layer (Prisma is recommended).
 6. Show current temperature, relative humidity, water status, warning state, device connectivity, and timestamps on a React dashboard.
 7. Display reading history and alert/incident history for the monitored area.
-8. Support test inputs from a software simulator before physical components are available.
+8. Support a software MQTT publisher for repeatable integration testing independently of physical hardware.
 9. Test measurement error, warning response time, false alarms, water-detection success, and data completeness.
 
-**Out of scope — Version 1:** automatic dehumidification, automatic pumps/valves, mold identification, direct measurements inside documents, autonomous room climate control, multiple rooms, AI prediction, cloud/SMS integrations, public internet deployment, commercial archival certification, and camera surveillance. A protected operator login and alert acknowledgment are **Later** features (see Section 11).
+**Out of scope:** automatic dehumidification, automatic pumps/valves, mold identification, direct measurements inside documents, autonomous room climate control, multiple rooms, AI prediction, cloud/SMS integrations, public internet deployment, commercial archival certification, and camera surveillance. Operator login and alert acknowledgment are also out of scope; no expansion roadmap is committed.
 
 ### 1.4 Objectives
 
 **General objective:** Develop and evaluate a low-cost ESP32-based system that monitors humidity and water intrusion and provides early warnings in a school document-storage area.
 
-**Specific objectives:** (SO-01) acquire temperature/humidity and water-detection data; (SO-02) generate persistent-condition and immediate-wetness alerts; (SO-03) store and visualize readings/incidents through a REST-based dashboard; (SO-04) evaluate accuracy, alert responsiveness, reliability, and false-alarm behavior through controlled testing.
+**Specific objectives:** (SO-01) acquire temperature/humidity and water-detection data; (SO-02) generate persistent-condition and immediate-wetness alerts; (SO-03) store and visualize readings/incidents through a WebSocket dashboard; (SO-04) evaluate accuracy, alert responsiveness, reliability, and false-alarm behavior through controlled testing.
 
 ### 1.5 Definitions and abbreviations
 
@@ -69,9 +72,10 @@ Schools retain paper records such as student files, certificates, enrollment doc
 | Water intrusion | Water detected at the installed probe's physical location |
 | Reading | One device report containing temperature, RH, wet/dry status, and a receipt timestamp |
 | Alert / incident | Recorded interval in which a warning condition is active |
-| REST API | HTTP interface used by the ESP32 simulator/device and the web dashboard |
+| MQTT | Device publish/subscribe protocol through a broker |
+| WebSocket | Bidirectional browser/backend connection for read requests and live updates |
 | Stale data | Last reading too old to describe current conditions reliably |
-| MVP | Minimum viable prototype: the Version 1 scope |
+| MVP | Minimum viable prototype: the agreed scope |
 | UTC | Coordinated Universal Time, used for stored timestamps |
 | LAN | Local area network connecting device, browser, and backend |
 
@@ -91,35 +95,31 @@ The preservation sources explain environmental risks; they do **not** automatica
 
 ### 2.1 System perspective
 
-DSMS has four parts:
-
-1. **Physical monitoring node** — ESP32 reads the DHT22 and water-detection module, applies local rules, operates the buzzer, and sends readings.
-2. **Express REST API** — authenticates the device, validates readings, processes alert rules, and exposes data for the dashboard.
-3. **PostgreSQL database** — stores a device record, time-series readings, and incident records.
-4. **React dashboard** — displays the latest state, histories, and connectivity indicators.
+DSMS has five parts: the ESP32 monitoring node and local buzzer, an MQTT broker, the Node.js/Express backend with MQTT subscriber and WebSocket server, PostgreSQL through Prisma, and the React dashboard.
 
 ```mermaid
 flowchart LR
-    S["DHT22 + water sensor"] --> E["ESP32 firmware"]
-    E --> B["Local buzzer"]
-    E -->|"Wi-Fi / HTTP POST"| A["Node.js + Express REST API"]
-    X["Simulated sensor script"] -.->|"Same HTTP POST contract"| A
+    S["DHT22 + water sensor"] --> E["ESP32"]
+    E --> Z["Local buzzer"]
+    E -->|MQTT over Wi-Fi| B["MQTT broker"]
+    X["Node.js device simulator"] -.->|Same MQTT contract| B
+    B -->|Subscribed readings| A["Node.js / Express backend"]
     A <--> P[(PostgreSQL via Prisma)]
-    W["React dashboard"] <-->|"HTTP GET"| A
+    A <-->|WebSocket requests and updates| W["React dashboard"]
 ```
 
-**No physical parts are required to build and verify the API, persistence layer, simulator, or dashboard.** The simulator replaces the ESP32 as the *producer of readings* only; backend and frontend contracts must remain the same.
+The backend validates authorized messages, persists readings/incidents, then pushes dashboard updates. The broker is a router, not the historical database. The simulator replaces the producer only. Topic/event details and failure boundaries are proposed in [COMMUNICATION.md](COMMUNICATION.md); networking is not yet implemented.
 
 ### 2.2 Users and stakeholders
 
 | Actor | Interest / permitted behavior |
 |---|---|
 | Storage caretaker / school staff | View current status, trends, incidents, and device connectivity; inspect conditions after a warning |
-| Project developer/tester | Configure test thresholds, run simulations, inspect APIs, validate hardware and measurements |
+| Project developer/tester | Configure test thresholds, run simulations, inspect message contracts, validate hardware and measurements |
 | Instructor / researcher | Evaluate requirements coverage and measured test results |
 | ESP32 / simulator (machine actor) | Submit readings using a device-specific credential; cannot perform staff operations |
 
-**Proposed MVP access model:** dashboards run only on a trusted school/lab private LAN and are read-only. Private network placement is not a substitute for authentication if the system is later opened to other users or networks. Protected staff actions are reserved for a later phase.
+**Proposed MVP access model:** dashboards run only on a trusted school/lab private LAN and are read-only. Private network placement is not a substitute for authentication if the system is later opened to other users or networks. Protected staff actions are outside the agreed scope.
 
 ### 2.3 Operating environment
 
@@ -131,17 +131,17 @@ flowchart LR
 
 ### 2.4 Constraints and dependencies
 
-- Version 1 uses **one ESP32, one DHT22, one water-sensing location, and one buzzer**.
+- The system uses **one ESP32, one DHT22, one water-sensing location, and one buzzer**.
 - ESP32 GPIOs are 3.3V logic; no 5V sensor output may directly drive a GPIO.
 - Sensor module wiring, trigger polarity, and USB connector vary by purchased model and must be checked against datasheets.
 - Local buzzer operation must not depend on the network, backend, database, or React application being online.
-- Reading receipt and incident history require a working server/database. An offline buffered upload queue is **not** a required Version 1 feature.
+- Reading receipt and incident history require a working broker/backend/database. An offline buffered upload queue is **not** a required feature.
 - Long-term operation of low-cost exposed-electrode water probes requires inspection for corrosion and false triggers.
 - Preset RH thresholds are **experimental starting points** and require site-specific review.
 
 ### 2.5 Assumptions
 
-- The ESP32 and backend can reach each other on a trusted private network in integration testing.
+- The ESP32 and backend can each reach the MQTT broker on a trusted private network in integration testing.
 - The monitored storage space permits sensor installation and safe routing of power/signal wiring.
 - The project group has access to a laptop, internet for package installation, and a reference hygrometer during validation.
 - No personally identifiable information from stored school records is collected; DSMS measures environmental conditions, not document contents.
@@ -164,10 +164,11 @@ These GPIO assignments are **proposed starting values**, not final wiring instru
 
 ### 3.2 Software interfaces
 
-- **Firmware -> backend:** HTTP JSON request to `POST /api/v1/readings` with an `X-DEVICE-KEY` header.
-- **Frontend -> backend:** read-only REST `GET` requests; browser must never contact database or access device secrets directly.
-- **Backend -> database:** Prisma client and PostgreSQL using parameterized ORM queries and schema migrations.
-- **Configuration:** environment variables for database connection, API listening port, allowed browser origin, and device-key secrets. No secrets in Git.
+- **Firmware -> broker -> backend:** JSON MQTT publications with device-specific broker credentials and topic ACLs. Backend checks topic/payload identity and registered enabled device.
+- **Frontend <-> backend:** WebSocket read requests, responses and live updates. Browser never contacts PostgreSQL or receives broker/device secrets.
+- **Backend -> database:** Prisma and PostgreSQL; database credentials remain backend-only.
+- **Configuration:** database URL, broker address/credentials, backend port and allowed WebSocket origins. No secrets in Git.
+- **Diagnostic HTTP:** a health endpoint can report backend/database/broker dependency status; it is not the device or dashboard data transport.
 
 ### 3.3 User interface requirements
 
@@ -175,19 +176,19 @@ These GPIO assignments are **proposed starting values**, not final wiring instru
 |---|---|
 | Dashboard | Area/device label, temperature, RH, wet/dry state, overall warning severity, last update |
 | History chart | Time-series temperature and RH with range selection and accessible labels |
-| Incident history | Alert type, severity, start, acknowledgement if implemented later, cleared time |
+| Incident history | Alert type, severity, start, cleared time |
 | Connectivity | ONLINE / STALE / OFFLINE badge and a visible last-received timestamp |
-| Empty/error states | Descriptive text when no readings, API connection errors, or outdated values occur |
+| Empty/error states | Descriptive text when no readings, backend connection errors, or outdated values occur |
 
 The first release may implement these as sections of a **single page**. Do not require separate authentication or multi-page routing to meet the MVP.
 
 ### 3.4 Communication interfaces
 
-- JSON over HTTP on the local LAN for development; HTTPS is required before any deployment across untrusted networks.
-- Content type `application/json; charset=utf-8`.
-- Server-generated timestamps are ISO 8601 UTC in API responses and stored in UTC in PostgreSQL.
-- Use the laptop's **LAN IP address**, not `localhost`, as the ESP32's server target.
-- Backend CORS allow-list shall contain only the explicit frontend development/deployment origins.
+- UTF-8 JSON over MQTT and WebSocket on the controlled LAN; MQTT over TLS and WSS for untrusted networks.
+- Use the broker LAN address from the ESP32, and backend WebSocket address from React. Device localhost is not the laptop.
+- Server receipt timestamps use UTC and are serialized as ISO 8601; PostgreSQL timestamps are timezone-aware.
+- Validate WebSocket Origin explicitly; CORS is not a substitute for upgrade authorization.
+- Reconnect with backoff and re-fetch state/history over WebSocket. MQTT delivery acknowledgment is not proof of database persistence.
 
 ---
 
@@ -213,13 +214,13 @@ The first release may implement these as sections of a **single page**. Do not r
 
 | ID | Priority | Requirement | Verification |
 |---|---|---|---|
-| FR-010 | MUST | Submit the current sensor state as JSON to `POST /api/v1/readings` at a configurable interval, initially **60 seconds** (*Proposed*). | API log inspection |
+| FR-010 | MUST | Publish the current sensor state as JSON on the authorized MQTT readings topic at a configurable interval, initially **60 seconds** (*Proposed*). | MQTT/DB log inspection |
 | FR-011 | MUST | Accept the same JSON payload from the ESP32 or the Node.js simulator. | Contract comparison |
-| FR-012 | MUST | Authenticate ingestion requests with a per-device secret; unknown/inactive devices shall be rejected. | Unauthorized request tests |
+| FR-012 | MUST | Authenticate MQTT clients and enforce topic ACLs; backend rejects unknown/inactive or mismatched devices. | Unauthorized request tests |
 | FR-013 | MUST | Validate `deviceId`, finite temperature/RH numbers, and boolean `waterDetected`; reject malformed payloads with a structured error. | Zod schema tests |
 | FR-014 | MUST | Record a server-generated `receivedAt` timestamp on successful storage. | Database inspection |
-| FR-015 | SHOULD | Support a unique optional `readingId` to deduplicate retried submissions; when present, repeated requests shall not create a second measurement. | Duplicate POST test |
-| FR-016 | MUST | Return a documented success/error response and appropriate HTTP status. | API tests |
+| FR-015 | SHOULD | Support a unique optional `readingUid` to deduplicate retried submissions; when present, repeated requests shall not create a second measurement. | MQTT redelivery test |
+| FR-016 | MUST | Record ingestion outcomes and emit WebSocket updates only after commit; broker acknowledgment alone does not prove storage. | MQTT/DB/WebSocket tests |
 
 ### 4.3 Persistence, alert creation, and lifecycle
 
@@ -228,7 +229,7 @@ The first release may implement these as sections of a **single page**. Do not r
 | FR-017 | MUST | Store each accepted observation with its related device. | DB foreign-key test |
 | FR-018 | MUST | Determine humidity warning eligibility based on continuous qualifying readings over elapsed time. | Alert timer unit test |
 | FR-019 | MUST | Create a critical water-intrusion alert promptly upon confirmed wet detection. | Water test |
-| FR-020 | MUST | Avoid duplicate **active alerts of the same type** for one device; new observations update the existing incident. | Repeated POST test |
+| FR-020 | MUST | Avoid duplicate **active alerts of the same type** for one device; new observations update the existing incident. | Repeated MQTT message test |
 | FR-021 | MUST | Support severity escalation from humidity WARNING to CRITICAL within the same incident. | Escalation test |
 | FR-022 | MUST | Record when an incident starts and clears, preserving its highest severity reached. | Incident timeline test |
 | FR-023 | MUST | Keep humidity and water incidents independent so both can exist simultaneously. | Combined-condition test |
@@ -240,34 +241,27 @@ The first release may implement these as sections of a **single page**. Do not r
 
 | ID | Priority | Requirement | Verification |
 |---|---|---|---|
-| FR-027 | MUST | Display the newest accepted temperature, humidity, water state, and received-at time. | Browser/API comparison |
+| FR-027 | MUST | Display the newest accepted temperature, humidity, water state, and received-at time. | Browser/persisted-event comparison |
 | FR-028 | MUST | Distinguish NORMAL, WARNING, CRITICAL, STALE, and OFFLINE states; missing data shall not be treated as NORMAL. | State cases |
 | FR-029 | MUST | Show historical measurements as a time-series chart. | Chart inspection |
 | FR-030 | MUST | Show a table of incidents with event type, severity, start, state, and cleared time if available. | Incident table test |
 | FR-031 | MUST | Show a helpful empty state when no reading exists for the selected device. | Empty DB test |
-| FR-032 | MUST | Handle API failures and display a visible error/retry state rather than silently keeping stale values. | Stop API test |
-| FR-033 | SHOULD | Poll the REST API every **10 seconds** for summary/current state (*Proposed*); chart history may load on demand. | Browser network inspection |
+| FR-032 | MUST | Handle backend/WebSocket failures and display a visible error/retry state rather than silently keeping stale values. | Stop backend/socket test |
+| FR-033 | SHOULD | Request snapshot/history on WebSocket connection and reconnection, then apply live events; chart history may load on demand. | Browser network inspection |
 | FR-034 | SHOULD | Filter history by a bounded interval (e.g., 24 hours or 7 days) and display units and timestamps clearly. | Filter test |
 
 ### 4.5 Testing and simulation
 
 | ID | Priority | Requirement | Verification |
 |---|---|---|---|
-| FR-035 | MUST | Provide a Node.js simulator that sends normal, warning, critical, dry, and wet readings using the same API contract as the ESP32. | Simulator runs |
+| FR-035 | MUST | Provide a Node.js simulator that sends normal, warning, critical, dry, and wet readings using the same MQTT contract as the ESP32. | Simulator runs |
 | FR-036 | MUST | Permit automated tests of persistence timing using a controlled/test clock or configurable thresholds, without physically waiting 30 minutes for every case. | Unit test suite |
-| FR-037 | MUST | Provide a documented health endpoint for verifying API process status and database dependency status. | Health checks |
+| FR-037 | MUST | Provide a documented health endpoint for verifying backend process, database and broker dependency status. | Health checks |
 | FR-038 | SHOULD | Capture test results for sensor error, detection accuracy, alert latency, false alarms, and accepted-versus-sent readings. | Research report |
 
-### 4.6 Later, protected administration (not required for first release)
+### 4.6 Scope boundary
 
-| ID | Priority | Requirement | Verification |
-|---|---|---|---|
-| FR-L01 | LATER | Authenticate at least one designated staff operator before enabling incident acknowledgment. | Login tests |
-| FR-L02 | LATER | Permit an authenticated operator to acknowledge an active incident without falsely marking the physical condition as resolved. | Acknowledge scenario |
-| FR-L03 | LATER | Audit who acknowledged an incident and when; log re-escalation events if added. | Audit inspection |
-| FR-L04 | LATER | Allow authorized adjustment of thresholds through a protected settings page. | Permission test |
-
-> **Important separation:** An **acknowledged** incident is not necessarily **cleared**. Acknowledgment means a staff member has seen it; clearance must follow sensor conditions. The original guide suggested `PATCH /api/v1/alerts/:id/acknowledge`; this specification retains it as a **Later** endpoint until proper staff authorization exists.
+Staff accounts, acknowledgment workflows, remote controls and settings pages are not included. Changing transports adds no new user-facing feature or entity. No second-version roadmap is committed.
 
 ---
 
@@ -307,18 +301,18 @@ stateDiagram-v2
     RECOVERY --> NORMAL: Recovery duration completed
 ```
 
-The diagram describes environmental *rule state*; the database holds one incident per active alert type, with `startedAt` and `clearedAt`. A later operator acknowledgment is a distinct administrative attribute, not a sensor state.
+The diagram describes environmental *rule state*; the database holds one incident per active alert type, with `startedAt` and `clearedAt`. Staff acknowledgment is outside scope.
 
 ### 5.3 Sample data intervals
 
 | Setting | Initial value | Status |
 |---|---|---|
-| Temperature/RH sample and POST interval | 60 seconds | Proposed |
+| Temperature/RH sample and MQTT publish interval | 60 seconds | Proposed |
 | Water contact check | At least once per second or interrupt-driven if hardware supports it | Proposed |
-| Dashboard summary refresh | 10 seconds | Proposed |
+| Dashboard summary delivery | Snapshot on connect/reconnect; live events after persistence | Selected transport |
 | Data stale limit | 180 seconds after last accepted reading | Proposed |
 | Offline indication | 300 seconds after last accepted reading | Proposed |
-| Display timezone | Asia/Manila in browser; UTC in database/API | Proposed |
+| Display timezone | Asia/Manila in browser; UTC in database/messages | Proposed |
 
 ---
 
@@ -327,10 +321,10 @@ The diagram describes environmental *rule state*; the database holds one inciden
 ### UC-01 — Observe document storage conditions
 
 - **Primary actor:** Storage caretaker.
-- **Precondition:** At least one valid reading exists; the dashboard can reach the API.
+- **Precondition:** At least one valid reading exists; the dashboard can reach the WebSocket server.
 - **Trigger:** User opens the dashboard.
-- **Main flow:** (1) Browser requests summary; (2) API fetches latest reading, active incidents, and device metadata; (3) browser displays RH, °C, wet/dry, latest update, and risk/connectivity status; (4) dashboard refreshes periodically.
-- **Alternative flows:** No readings -> show awaiting data; API unavailable -> show connection error; last reading too old -> show STALE/OFFLINE.
+- **Main flow:** (1) Browser requests summary over WebSocket; (2) backend fetches latest reading, active incidents, and device metadata; (3) browser displays RH, °C, wet/dry, latest update, and risk/connectivity status; (4) dashboard receives committed WebSocket updates.
+- **Alternative flows:** No readings -> show awaiting data; Backend/socket unavailable -> show connection error; last reading too old -> show STALE/OFFLINE.
 - **Postcondition:** User sees current or explicitly out-of-date system status.
 
 ### UC-02 — Detect water intrusion
@@ -338,7 +332,7 @@ The diagram describes environmental *rule state*; the database holds one inciden
 - **Primary actor:** ESP32 / simulator.
 - **Precondition:** Water sensor installed, or simulator in wet scenario.
 - **Trigger:** Probe changes to wet.
-- **Main flow:** (1) ESP32 detects the condition; (2) buzzer activates locally; (3) POST reports wet state when Wi-Fi is available; (4) backend creates/updates the active water incident; (5) frontend shows critical warning.
+- **Main flow:** (1) ESP32 detects the condition; (2) buzzer activates locally; (3) MQTT reports wet state when Wi-Fi is available; (4) backend creates/updates the active water incident; (5) frontend shows critical warning.
 - **Alternative flow:** Wi-Fi unavailable -> buzzer still activates; remote dashboard does not update and eventually displays stale/offline state.
 - **Postcondition:** Local warning exists and any successfully received incident is stored.
 
@@ -358,145 +352,62 @@ The diagram describes environmental *rule state*; the database holds one inciden
 ### UC-05 — Run without physical hardware
 
 - **Primary actor:** Developer.
-- **Precondition:** API and database running; simulator configured with permitted test device key.
-- **Main flow:** (1) Developer selects simulator scenario; (2) script submits the standard readings payload; (3) backend validates/stores it and calculates alerts; (4) dashboard shows the result; (5) developer compares API, database, and UI.
+- **Precondition:** Broker, backend and database running; simulator configured with permitted broker credential and topic ACL.
+- **Main flow:** (1) Developer selects simulator scenario; (2) script submits the standard readings payload; (3) backend validates/stores it and calculates alerts; (4) dashboard shows the result; (5) developer compares broker/backend logs, database, and UI.
 - **Postcondition:** Complete software pathway verified before hardware procurement.
 
 ### UC-06 — Recover from temporary disconnection
 
 - **Primary actor:** ESP32 / backend.
 - **Trigger:** Wi-Fi or server unavailable.
-- **Main flow:** (1) Firmware continues sensing and sounding relevant local alarms; (2) failed POST is logged locally/diagnostically; (3) dashboard marks data as STALE/OFFLINE as time passes; (4) on reconnection the device resumes publishing current readings.
+- **Main flow:** (1) Firmware continues sensing and sounding relevant local alarms; (2) failed MQTT publication is logged locally/diagnostically; (3) dashboard marks data as STALE/OFFLINE as time passes; (4) on reconnection the device resumes publishing current readings.
 - **Postcondition:** Network failures are visible; no fictitious observations are created.
-- **Limitation:** Version 1 does not guarantee reconstruction of measurements missed while offline.
+- **Limitation:** The system does not guarantee reconstruction of measurements missed while offline.
 
 ---
 
-## 7. REST API specification
+## 7. MQTT and WebSocket specification
 
-### 7.1 General conventions
+[COMMUNICATION.md](COMMUNICATION.md) defines the proposed contracts and examples. MQTT broker product and WebSocket library are not selected by this specification. A plain WebSocket client cannot connect to Socket.IO without its corresponding protocol implementation.
 
-- Base URL: `http://<backend-LAN-IP>:3000/api/v1` during local prototyping.
-- The ESP32 uses the server's LAN IP rather than `localhost`.
-- JSON is the request/response format.
-- Values use `temperatureC` (degrees Celsius), `humidityPercent` (0–100), and `waterDetected` (boolean).
-- Server time is authoritative for persistence-rule evaluation in Version 1; requests may include an optional `readingId` for future deduplication.
-- Keys are compared to stored hashes/secure configuration; never store or log plaintext API keys.
-- Error envelope: `{ "error": { "code": "INVALID_READING", "message": "...", "details": [] } }`.
-- Common errors: `400` malformed data; `401` missing/invalid key; `403` inactive device; `404` unknown resource; `409` conflicting duplicate if not treated idempotently; `429` excessive requests; `500` server error; `503` dependency unavailable.
+### 7.1 Device publications
 
-### 7.2 Endpoint contract table
+Publish JSON to `dsms/<deviceCode>/readings`. Payload fields: public `deviceId` (the registered deviceCode), temperatureC, humidityPercent, waterDetected, and readingUid. Resolve deviceCode to the internal integer device ID. readingUid is optional in the schema; MQTT producers should include a stable ID per measurement and reuse it for redelivery.
 
-| ID | Method | Endpoint | Actor | MVP | Behavior |
-|---|---|---|---|---|---|
-| API-01 | GET | `/api/v1/health` | Developer | Yes | Report process and dependency status |
-| API-02 | POST | `/api/v1/readings` | ESP32/simulator | Yes | Authenticate, validate, save, evaluate alerts |
-| API-03 | GET | `/api/v1/readings/latest?deviceId=DOC-ROOM-01` | Dashboard | Yes | Return most recent reading or null |
-| API-04 | GET | `/api/v1/readings?deviceId=DOC-ROOM-01&limit=100` | Dashboard | Yes | Return ordered readings, bounded to max 500 |
-| API-05 | GET | `/api/v1/alerts?deviceId=DOC-ROOM-01&limit=100` | Dashboard | Yes | Return active and historical incidents |
-| API-06 | GET | `/api/v1/dashboard/summary?deviceId=DOC-ROOM-01` | Dashboard | Yes | Return latest measurement, active alert summary, connectivity |
-| API-07 | PATCH | `/api/v1/alerts/:id/acknowledge` | Authorized staff | **Later** | Acknowledge incident, not clear condition |
+Validate topic ownership, enabled device and finite values. Proposed temperature bounds remain -20..80 C pending sensor review; RH must be 0..100. Use QoS 1 and non-retained telemetry as proposed defaults, with a compatible firmware library. Duplicate IDs must not create duplicate records or refresh old timestamps. Invalid messages are rejected/logged without a DB write. Transport acknowledgment is not a persisted success response; no HTTP status or API-key header is used for sensor submission.
 
-The query `deviceId` refers to the **public `deviceCode`** (for example `DOC-ROOM-01`), not the internal database UUID. Documentation, simulator, and API shall consistently use this convention.
+### 7.2 Dashboard requests and events
 
-### 7.3 POST /api/v1/readings
+| Request/event | Direction | Purpose |
+|---|---|---|
+| dashboard.get / dashboard.snapshot | Browser request / backend response | Current device, latest reading, active incidents, risk and freshness |
+| readings.get / readings.result | Browser request / backend response | Bounded measurement history |
+| alerts.get / alerts.result | Browser request / backend response | Bounded incident history |
+| reading.created | Backend push | Newly committed reading |
+| alert.changed | Backend push | Incident open/escalation/clear after commit |
+| device.status | Backend push | Freshness change, including during device silence |
+| error | Backend response | Safe code/message and matching requestId |
 
-**Request headers**
+History uses deviceCode, optional from/to and limit (default 100, maximum 500 proposed), stable timestamp/ID order and requestId correlation. All dashboard operations remain read-only. On initial connection/reconnection, request snapshot and history and reconcile them with live events without overwriting newer data. Show socket connection status separately from sensor freshness. No staff actions or remote-device commands are introduced.
 
-```http
-Content-Type: application/json
-X-DEVICE-KEY: <device-secret>
-```
-
-**Required body**
-
-```json
-{
-  "deviceId": "DOC-ROOM-01",
-  "temperatureC": 28.4,
-  "humidityPercent": 68.2,
-  "waterDetected": false
-}
-```
-
-**Validation**: `deviceId` nonempty known device code; finite `temperatureC` in an equipment-appropriate permissible interval (initial design check -20 to 80 °C, *Proposed*); finite RH between 0 and 100 inclusive; `waterDetected` true or false, never a string. Do not silently clamp invalid measurements. Optional `readingId` can be a UUID for idempotent retries.
-
-**Example success (`201 Created`)**
-
-```json
-{
-  "data": {
-    "id": "c1a5d3b5-87ab-4d8a-b6ac-cc507c87f4bc",
-    "deviceId": "DOC-ROOM-01",
-    "temperatureC": 28.4,
-    "humidityPercent": 68.2,
-    "waterDetected": false,
-    "receivedAt": "2026-11-05T05:00:00.000Z"
-  },
-  "status": {
-    "environmentalRisk": "NORMAL",
-    "connectivity": "ONLINE"
-  }
-}
-```
-
-An RH of 68.2% **does not automatically mean a 15-minute critical alert exists**: the server must evaluate persistence over time before changing severity. For a first high reading, the risk response may still be NORMAL while qualifying timers accumulate.
-
-### 7.4 GET /api/v1/dashboard/summary
-
-**Example response (`200 OK`)**
-
-```json
-{
-  "data": {
-    "device": { "deviceId": "DOC-ROOM-01", "name": "Records Room Sensor", "location": "Records Room" },
-    "latest": {
-      "temperatureC": 28.4,
-      "humidityPercent": 68.2,
-      "waterDetected": false,
-      "receivedAt": "2026-11-05T05:00:00.000Z"
-    },
-    "environmentalRisk": "WARNING",
-    "connectivity": "ONLINE",
-    "activeAlerts": [
-      {
-        "id": "a857b8c2-fb08-4b7b-a711-2e5fbb7d1f8a",
-        "type": "HUMIDITY",
-        "severity": "WARNING",
-        "startedAt": "2026-11-05T04:30:00.000Z"
-      }
-    ]
-  }
-}
-```
-
-This example assumes the RH warning has qualified from earlier accepted readings. When the device is STALE or OFFLINE, `connectivity` changes without overriding the already-recorded `environmentalRisk`.
-
-### 7.5 History API behaviors
-
-- Return a JSON `data` array with newest first for tables; for line charts, the frontend may reverse into ascending time order after retrieval.
-- `limit` defaults to 100 and cannot exceed 500 (*Proposed*).
-- Permit optional `from` and `to` ISO 8601 timestamps; reject ranges where `from > to`.
-- No API shall expose device keys or database credentials.
-- Errors shall not return stack traces or internal SQL details to the browser.
-
-### 7.6 API sequence
+### 7.3 Processing sequence
 
 ```mermaid
 sequenceDiagram
     participant D as ESP32 or simulator
-    participant A as Express API
+    participant B as MQTT broker
+    participant A as Backend
     participant P as PostgreSQL
-    participant U as React dashboard
-    D->>A: POST /api/v1/readings + device key
-    A->>A: Authenticate + validate
-    A->>P: Insert SensorReading
-    A->>A: Evaluate threshold durations
-    A->>P: Create/update/clear Alert (if changed)
-    A-->>D: 201 Created / status
-    U->>A: GET /api/v1/dashboard/summary
-    A->>P: Fetch latest reading and active alerts
-    A-->>U: 200 JSON summary
+    participant U as React
+    D->>B: Publish reading on authorized topic
+    B->>A: Deliver subscribed reading
+    A->>A: Validate identity and payload; deduplicate
+    A->>P: Transaction: reading and incident updates
+    P-->>A: Commit
+    A-->>U: WebSocket reading.created / alert.changed
+    U->>A: WebSocket dashboard.get or history request
+    A->>P: Query persisted state
+    A-->>U: Correlated snapshot / history response
 ```
 
 ---
@@ -506,105 +417,37 @@ sequenceDiagram
 ### 8.1 Database conventions
 
 - PostgreSQL relational database with Prisma schema as the selected ORM representation.
-- IDs: internal UUID primary keys; external `deviceCode` is a unique human-readable identifier.
+- IDs: internal auto-incrementing integer primary keys; external `deviceCode` is a unique human-readable identifier.
 - All times stored as timestamp with timezone (UTC semantics) and returned in ISO 8601 UTC.
 - Foreign keys shall preserve relationship integrity; prevent accidental cascade deletion of historical records in the MVP.
 - Add indexes appropriate for latest-per-device and history queries.
 
 ### 8.2 Core logical ERD
 
-```mermaid
-erDiagram
-    DEVICE ||--o{ SENSOR_READING : produces
-    DEVICE ||--o{ ALERT : raises
+See [ERD.md](ERD.md) for the current three-model diagram, aligned with `backend/prisma/schema.prisma`. Device has many SensorReading and Alert records. Alerts relate to a device rather than one triggering reading because incidents can span many measurements.
 
-    DEVICE {
-      uuid id PK
-      string device_code UK
-      string name
-      string location
-      string api_key_hash
-      boolean is_active
-      datetime created_at
-    }
+### 8.3 Data dictionary
 
-    SENSOR_READING {
-      uuid id PK
-      uuid device_id FK
-      float temperature_c
-      float humidity_percent
-      boolean water_detected
-      string reading_uid "nullable, optional"
-      datetime received_at
-    }
+| Entity | Fields |
+|---|---|
+| Device | Integer generated id; unique TEXT deviceCode; TEXT name/location; Boolean isActive default true; timezone-aware createdAt and updatedAt |
+| SensorReading | Integer generated id; integer deviceId foreign key; Float temperatureC/humidityPercent; Boolean waterDetected; nullable TEXT readingUid; timezone-aware receivedAt |
+| Alert | Integer generated id; integer deviceId foreign key; AlertType, AlertSeverity, AlertStatus; TEXT message; timezone-aware startedAt and nullable clearedAt |
 
-    ALERT {
-      uuid id PK
-      uuid device_id FK
-      string type "HUMIDITY or WATER"
-      string severity "WARNING or CRITICAL"
-      string status "OPEN or CLEARED"
-      string message
-      datetime started_at
-      datetime cleared_at "nullable"
-      datetime acknowledged_at "nullable, later"
-    }
-```
+Enums: HUMIDITY/WATER, WARNING/CRITICAL, OPEN/CLEARED. Match camelCase schema fields; no mappings to snake_case or UUID IDs are currently configured. No API-key field is required; broker authentication is separate from database credentials and device identity.
 
-This corresponds to the guide's **three core models**. Mermaid expresses cardinality; it is a visual specification, not an automatically executed SQL migration. The database must enforce constraints separately.
-
-### 8.3 Core data dictionary
-
-**DEVICE**
-
-| Field | Type | Constraints | Description |
-|---|---|---|---|
-| id | UUID | PK, generated | Internal identifier |
-| device_code | VARCHAR(64) | UNIQUE, NOT NULL | External `deviceId` in API |
-| name | VARCHAR(120) | NOT NULL | Readable device label |
-| location | VARCHAR(200) | NOT NULL | Physical placement description |
-| api_key_hash | TEXT | NOT NULL | Stored verifier for device credential |
-| is_active | BOOLEAN | NOT NULL DEFAULT true | Whether ingestion is permitted |
-| created_at | TIMESTAMPTZ | NOT NULL | Registration time |
-
-**SENSOR_READING**
-
-| Field | Type | Constraints | Description |
-|---|---|---|---|
-| id | UUID | PK | Reading identifier |
-| device_id | UUID | FK -> DEVICE.id, NOT NULL | Originating device |
-| temperature_c | DOUBLE PRECISION | NOT NULL, finite | Temperature °C |
-| humidity_percent | DOUBLE PRECISION | 0..100, NOT NULL | Air relative humidity |
-| water_detected | BOOLEAN | NOT NULL | Sensor wet/dry input |
-| reading_uid | VARCHAR(64) | NULL, UNIQUE with device_id when present | Optional deduplication ID |
-| received_at | TIMESTAMPTZ | NOT NULL | Server receipt time |
-
-**ALERT**
-
-| Field | Type | Constraints | Description |
-|---|---|---|---|
-| id | UUID | PK | Incident identifier |
-| device_id | UUID | FK -> DEVICE.id, NOT NULL | Device generating incident |
-| type | ENUM/TEXT | HUMIDITY, WATER | Environmental trigger |
-| severity | ENUM/TEXT | WARNING, CRITICAL | Highest current/recorded severity |
-| message | TEXT | NOT NULL | Human-readable explanation |
-| status | ENUM/TEXT | OPEN, CLEARED | Whether condition remains active |
-| started_at | TIMESTAMPTZ | NOT NULL | Start of alert incident |
-| cleared_at | TIMESTAMPTZ | NULL until cleared | Recovery completion time |
-| acknowledged_at | TIMESTAMPTZ | NULL, **Later** | Staff confirmation time |
-
-**Minimum useful indexes**: `(device_id, received_at DESC)` on SENSOR_READING, `(device_id, started_at DESC)` on ALERT, and a database-level guarantee of at most one `OPEN` ALERT per `(device_id, type)` (for example, a conditional unique index where supported). An optional unique constraint on `(device_id, reading_uid)` enforces idempotency for non-null IDs.
+Existing schema/migration includes unique deviceCode, optional compound reading deduplication, device/time indexes and restrictive deletion foreign keys. Additional requirements still need a migration: finite/range checks, alert status/clearedAt consistency, and one OPEN alert per device/type via a partial unique index. Do not use a general unique constraint on device/type/status because it would restrict cleared history. Source files alone do not verify migration application to the database.
 
 ### 8.4 Retention, privacy, and backup
 
 - **Proposed:** retain raw readings for a 30-day evaluation period and incident summaries for the study; finalize retention with the instructor and target institution.
-- **Proposed:** export evaluation results as CSV as a later convenience; it is not an MVP requirement.
+- CSV export is outside the agreed scope.
 - Store no document titles, student names, personal records, or document contents.
 - Make a safe backup of the database during evaluations. Test restoring at least one non-production backup before final demonstration (*Proposed*).
 
-### 8.5 Optional future operator model
+### 8.5 Scope boundary
 
-If the team later enables protected incident acknowledgment, add a staff `OPERATOR` table with an identifier, name, unique email, password hash, and active status; link `ALERT.acknowledged_by_id` to it. **Do not build unauthenticated acknowledgment simply to make the button functional.** This operator entity is not required for the initial three-table ERD.
+Device, SensorReading and Alert cover the agreed features. There is no staff-account, acknowledgment, notification-delivery or remote-control entity in the current scope.
 
 ---
 
@@ -616,19 +459,19 @@ These performance and quality targets are **proposed acceptance targets** for a 
 |---|---|---|---|
 | NFR-001 | Accuracy | Compare RH readings to a reference hygrometer; target absolute difference <= 5 percentage points under controlled conditions, with observed limits reported | Side-by-side calibration test |
 | NFR-002 | Water response | Sustained wet contact shall trigger local warning within <= 5 seconds of sensor detection (subject to approved debounce) | Timed trials |
-| NFR-003 | Network API response | 95% of valid LAN ingestion requests complete within 2 seconds under single-device test load | Timed API tests |
+| NFR-003 | Network ingestion latency | 95% of valid LAN MQTT readings reach database commit within 2 seconds under single-device test load | Timed MQTT/DB tests |
 | NFR-004 | Dashboard freshness | When backend and browser are available, a newly accepted reading appears within <= 15 seconds | Browser timing test |
 | NFR-005 | Data completeness | Target >= 95% accepted/expected samples during a stable one-hour LAN test; report actual rate | Count reconciliation |
 | NFR-006 | Connectivity status | Mark age >180s STALE and >300s OFFLINE (configurable thresholds) | Controlled outage test |
 | NFR-007 | Robustness | Invalid sensor data shall not corrupt stored history, crash backend, or be treated as normal readings | Fault injection |
-| NFR-008 | Availability | Local buzzer shall continue to work when Wi-Fi/API is unavailable | Disconnect test |
+| NFR-008 | Availability | Local buzzer shall continue to work when Wi-Fi/broker/backend is unavailable | Disconnect test |
 | NFR-009 | Recoverability | Backend shall restart safely without deleting historical readings or duplicating open incidents | Restart test |
-| NFR-010 | Security | Device ingestion requires a secret; non-successful auth must not write data; no secrets on frontend or in Git | API/security tests |
+| NFR-010 | Security | Device ingestion requires a secret; non-successful auth must not write data; no secrets on frontend or in Git | Broker/WebSocket security tests |
 | NFR-011 | Maintainability | Separate frontend, backend, simulator, firmware, configuration, migrations, and test folders | Repository review |
 | NFR-012 | Usability | Critical/warning indicators shall use text and/or icons, not color alone; show units and timestamp | UI inspection |
 | NFR-013 | Portability | Frontend/browser and backend shall work on an ordinary development laptop and on a private LAN | Multi-browser/local test |
-| NFR-014 | Data integrity | Reject malformed readings, maintain foreign keys, and avoid duplicate active incidents | DB/API tests |
-| NFR-015 | Privacy | Collect only environmental telemetry, device metadata, and optional staff audit data in Later phase | Database inspection |
+| NFR-014 | Data integrity | Reject malformed readings, maintain foreign keys, and avoid duplicate active incidents | DB/message tests |
+| NFR-015 | Privacy | Collect only environmental telemetry, incidents and device metadata | Database inspection |
 | NFR-016 | Cost | Aim to remain near the source guide's planning allowance of ₱1,030–₱1,470 for hardware plus validation items, subject to actual quotes | Purchase record |
 
 **Sensor accuracy caveat:** The DHT22 and reference hygrometer may both have error. A low-cost comparison provides practical agreement evidence, not laboratory-grade certification. Record equipment specifications, ambient test conditions, and number of trials.
@@ -639,13 +482,12 @@ These performance and quality targets are **proposed acceptance targets** for a 
 
 ### 10.1 Minimum security for MVP
 
-1. `X-DEVICE-KEY` authenticates writes to ingestion endpoints; a device must also match a registered active `deviceCode`.
-2. Store credentials in local environment variables or secure device configuration; store only hashes/verifiers in the database where appropriate. Never commit keys to source control.
-3. Apply Zod validation to payloads and restrict request size and frequency to sensible limits.
-4. Limit LAN API exposure and Windows Firewall rules to the intended private network; never assume CORS is authentication.
-5. Serve only read-only dashboard operations until an operator authentication flow is implemented.
-6. Remove secrets, unneeded personal information, and device keys from logged errors.
-7. Require HTTPS before providing the API across the public internet or other untrusted networks.
+1. Authenticate devices at the broker and restrict each to its own topic. Backend verifies topic/payload identity and known active deviceCode. Use a separate backend broker account.
+2. Keep broker and database credentials out of Git, browser payloads and logs. Prisma's Device stores identity, not broker passwords.
+3. Validate MQTT/WebSocket data and bound message sizes, rates, queries and send queues.
+4. Limit broker/backend firewall access to the intended private LAN; validate WebSocket Origin. Neither CORS nor deviceCode is authentication.
+5. Allow only read-only dashboard requests; no staff administration is included.
+6. Use MQTT over TLS and WSS over untrusted networks. Public deployment is outside scope.
 
 ### 10.2 Operational safety
 
@@ -668,14 +510,15 @@ These performance and quality targets are **proposed acceptance targets** for a 
 | Frontend | React + Vite + JavaScript | One-page responsive dashboard |
 | Frontend styling | CSS initially; Tailwind optional | Avoid front-loading unnecessary dependencies |
 | Data charts | Recharts | Temperature/RH time series |
-| Frontend HTTP | Native Fetch API | REST polling; no WebSocket dependency |
-| API runtime | Node.js LTS | ESM is suitable for JavaScript backend |
-| API framework | Express | REST routes and middleware |
-| Validation | Zod | Incoming API data and filters |
+| Frontend communication | WebSocket | Snapshot/history requests and live events; library choice pending |
+| Device communication | MQTT broker and clients | Device credentials, topic ACLs, non-retained readings |
+| Backend runtime | Node.js LTS | ESM is suitable for JavaScript backend |
+| Backend framework | Express plus WebSocket server and MQTT subscriber | Diagnostic HTTP may remain |
+| Validation | Zod | Incoming MQTT/WebSocket data and filters |
 | Data store | PostgreSQL | Persistent records |
 | ORM | Prisma | Use version-consistent generator, adapter, and config; do not mix major-version tutorials |
-| Local testing | Node.js simulator + Postman/Bruno | No physical hardware required at first |
-| Version control | Git | Track API contract, migrations, test cases |
+| Local testing | Node.js MQTT simulator + WebSocket test client | Software path can be tested independently of hardware |
+| Version control | Git | Track message contracts, migrations, test cases |
 
 ### 11.2 Proposed repository structure
 
@@ -691,7 +534,7 @@ document-storage-monitor/
 │   │   │   ├── DeviceStatus.jsx
 │   │   │   └── AlertTable.jsx
 │   │   ├── pages/Dashboard.jsx
-│   │   ├── services/api.js
+│   │   ├── services/socket.js
 │   │   ├── App.jsx
 │   │   └── main.jsx
 │   ├── .env.example
@@ -710,7 +553,7 @@ document-storage-monitor/
 │   ├── .env.example
 │   └── package.json
 ├── firmware/
-│   └── (ESP32 code added when hardware/framework is selected)
+│   └── (existing PlatformIO ESP32 local prototype; MQTT pending)
 ├── docs/
 │   ├── SRS.md
 │   ├── ERD.md
@@ -729,9 +572,9 @@ For Prisma 7+, its default generator emits TypeScript files and requires a confi
 
 | Test ID | Requirement(s) | Scenario | Expected result |
 |---|---|---|---|
-| AT-01 | FR-010–016 | Simulator submits valid reading and valid device key | Reading persisted, `201`, valid JSON |
-| AT-02 | FR-012–013 | Unknown device or invalid key | Rejection, no DB insert |
-| AT-03 | FR-013 | RH = 140, missing boolean, `NaN`, malformed JSON | `400`, no DB insert |
+| AT-01 | FR-010–016 | Simulator publishes valid authorized MQTT reading | Reading persisted, then WebSocket event |
+| AT-02 | FR-012–013 | Unknown device, invalid broker credential or unauthorized topic | Rejection, no DB insert |
+| AT-03 | FR-013 | RH = 140, missing boolean, `NaN`, malformed JSON | Rejected/logged, no DB insert |
 | AT-04 | FR-018–021 | RH >= 60% continuously for configured 30 min | One active humidity WARNING |
 | AT-05 | FR-021 | RH >= 65% for configured 15 min after warning | Same humidity incident escalates to CRITICAL |
 | AT-06 | FR-019,023 | Wet sensor while humidity warning active | Separate CRITICAL water incident, humidity incident retained |
@@ -744,7 +587,9 @@ For Prisma 7+, its default generator emits TypeScript files and requires a confi
 | AT-13 | FR-035–036 | Run scripted normal/warn/critical/wet scenarios with test clock | Consistent incident progression |
 | AT-14 | NFR-001 | Compare sensor with reference across recorded conditions | Error computed and documented |
 | AT-15 | NFR-003–005 | Sustained 1h simulator integration test | Response/freshness/completeness reported against targets |
-| AT-16 | FR-015 | Retry with same optional readingId | No duplicate stored reading, if feature implemented |
+| AT-16 | FR-015 | Retry with same optional readingUid | No duplicate stored reading, if feature implemented |
+
+Additional communication acceptance cases: reject a device publishing to another device's topic; simulate broker and database outages without disabling the local alarm; verify a disconnected browser reloads snapshot/history and cannot overwrite newer events; distinguish a connected socket from fresh device data. These tests do not establish guaranteed offline replay.
 
 ### 12.2 Research validation plan
 
@@ -755,35 +600,27 @@ For Prisma 7+, its default generator emits TypeScript files and requires a confi
 - **Data completeness:** compare the number of expected sent reports to records accepted within a stable one-hour LAN trial; explain missing data.
 - **Usability:** ask intended caretakers whether severity, location, last-seen time, and incident history are understandable; do not present a subjective survey as technical accuracy.
 
-### 12.3 Definition of done for Version 1
+#### 12.3 Definition of done for the agreed scope
 
-Release is acceptable for a controlled demonstration when: all **MUST** requirements have tests; a simulator-to-API-to-database-to-dashboard workflow functions; the ESP32 can replace the simulator with the same payload contract; the buzzer functions without Wi-Fi; the dashboard correctly shows stale/offline data; all active incidents are deduplicated; the group reports measured results and limitations; and no secrets are committed.
+Release is acceptable for a controlled demonstration when: all **MUST** requirements have tests; a simulator-to-broker-to-backend-to-database-to-WebSocket-dashboard workflow functions; the ESP32 can replace the simulator with the same payload contract; the buzzer functions without Wi-Fi; the dashboard correctly shows stale/offline data; all active incidents are deduplicated; the group reports measured results and limitations; and no secrets are committed.
 
 ---
 
-## 13. Development plan without physical components
+## 13. Development plan
 
 | Phase | Deliverable | Exit criterion |
 |---|---|---|
-| 1. Repository scaffolding | `frontend/`, `backend/`, `firmware/`, `docs/`; Git; `.env.example` | Apps start locally |
-| 2. API contract | Express health and in-memory POST/GET endpoints with Zod | Postman tests pass |
-| 3. Sensor simulation | `simulate-device.js` with normal, high-RH, and wet scenarios | REST calls accepted |
-| 4. Persistence | PostgreSQL schema and Prisma migration | Records survive restart |
-| 5. Alert engine | Humidity timing, water, clear, escalate, dedup tests | AT-04–09 pass with controlled clock |
-| 6. Frontend dashboard | Live summary, history chart, incidents, connectivity | UI displays actual API data |
-| 7. Hardware integration | ESP32 firmware, DHT22, water probe, buzzer | Simulator can be unplugged/replaced |
-| 8. Evaluation | Timed controlled experiments and results | Test matrix and report complete |
+| 1. Database | Three models, reviewed migrations, registered device | Persistence and integrity checks pass |
+| 2. Broker and ingestion | Credentials/ACLs and backend MQTT subscriber | Authorized data accepted; spoofed/invalid data rejected |
+| 3. Device simulator | Node MQTT publisher | One measurement saved; duplicate ignored safely |
+| 4. Alert processing | Qualification, escalation, recovery and gap rules | Controlled-clock tests pass |
+| 5. WebSocket dashboard | Snapshot/history requests and committed live events | Correct UI state on connect, update and reconnect |
+| 6. Physical integration | Individually verified components, Wi-Fi/MQTT firmware | Physical device replaces simulated publisher using same contract |
+| 7. Evaluation | Outage, timing, hardware and completeness tests | Results and limitations documented |
 
-### 13.1 Recommended first vertical slice
+### 13.1 First complete data flow
 
-1. Initialize Express and create `GET /api/v1/health`.
-2. Implement the validation contract for `POST /api/v1/readings` with **temporary memory storage**.
-3. Run a Node.js simulator and confirm JSON ingest through Postman.
-4. Add database migrations and persistent storage.
-5. Build React cards from the real `GET /api/v1/dashboard/summary` response.
-6. Only then implement the full history, alert timers, and firmware.
-
-This order avoids building a static dashboard unrelated to real device data.
+One simulated MQTT reading -> broker -> validated backend -> PostgreSQL -> WebSocket -> React. Physical sensors can be tested separately in Serial Monitor while this software path is developed. See [DEVELOPMENT_GUIDE.md](DEVELOPMENT_GUIDE.md).
 
 ---
 
@@ -796,11 +633,11 @@ This order avoids building a static dashboard unrelated to real device data.
 | R-03 | Water probe corrodes or false-triggers | Controlled trials, inspection, replaceable probe, sensor placement review |
 | R-04 | ESP32 lacks internet/LAN access | Validate same-LAN routing; local buzzer continues independently |
 | R-05 | School requires more strict document conditions | Agree experimental thresholds with adviser/staff; never claim standards compliance |
-| R-06 | Requirements expand to many rooms or automatic controls | Keep out of Version 1; record as future work |
+| R-06 | Requirements expand to many rooms or automatic controls | Keep outside the agreed scope |
 | R-07 | Instructor says “ESP32 only” and may mean no Arduino *framework* | Confirm ESP-IDF vs Arduino-ESP32 software tooling separately from hardware restriction |
 | R-08 | Current Prisma major version differs from code examples | Pin versions; read version-matched Prisma generator/adapter docs before installing |
 | R-09 | Incident timers behave ambiguously during missing readings | Implement explicit >180-second gap rule and test it |
-| R-10 | Operator acknowledgment endpoint exists in guide without auth plan | Defer PATCH until protected staff authentication is built |
+| R-10 | MQTT redelivery or browser reconnect produces duplicate/stale state | Stable readingUid, DB uniqueness, snapshot/event reconciliation and outage tests |
 
 ### Decisions to confirm at the team's design review
 
@@ -808,9 +645,9 @@ This order avoids building a static dashboard unrelated to real device data.
 - [ ] Instructor approves one ESP32 board and chosen firmware framework.
 - [ ] Sensor component exact models and electrical compatibility checked.
 - [ ] Initial RH thresholds, durations, and recovery policy accepted as experimental values.
-- [ ] Sampling rate, stale/offline timing, and API refresh frequency accepted.
-- [ ] Backend stays JavaScript or adopts TypeScript for Prisma integration.
-- [ ] Read-only LAN-only MVP vs future staff login agreed.
+- [ ] Sampling rate, stale/offline timing, and WebSocket recovery behavior accepted.
+- [ ] JavaScript Prisma client and PostgreSQL adapter integration verified.
+- [ ] Read-only LAN access boundaries verified; staff login remains excluded.
 - [ ] Research trials, reference instrument, and retention duration approved.
 
 ---
@@ -837,15 +674,16 @@ This is a **planning** list copied/adapted from the supplied visual guide, not a
 ## Appendix B — Intended project outputs
 
 1. Working ESP32 prototype with safe sensor installation and buzzer.
-2. Node.js/Express REST API and tests.
+2. Node.js/Express backend with MQTT subscriber, WebSocket interface and tests.
 3. PostgreSQL database schema/migrations and seeded device record.
-4. React dashboard connected to the real API.
+4. React dashboard connected to the backend over WebSocket.
 5. Node.js sensor simulator used before hardware integration.
 6. Mermaid ERD and technical architecture diagram.
 7. Controlled experimental results and documented constraints.
 
 ## Appendix C — Diagram companion files
 
+- `COMMUNICATION.md` - selected architecture and proposed messaging contracts.
 - `ERD.md` — standalone Mermaid database ERD, cardinals, and explanation.
 - `DEVELOPMENT_GUIDE.md` — repository initialization, Mermaid preview directions, software-first workflow, and dependency recommendations.
 

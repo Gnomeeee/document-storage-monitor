@@ -1,13 +1,65 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
+    provider = "prisma-client-js"
+    output   = "../src/generated/prisma"
 }
 
 datasource db {
-  provider = "postgresql"
+    provider = "postgresql"
+}
+
+model Device {
+    id         Int             @id @default(autoincrement())
+    deviceCode String          @unique
+    name       String
+    location   String
+    isActive   Boolean         @default(true)
+    createdAt  DateTime        @default(now()) @db.Timestamptz(3)
+    updatedAt  DateTime        @updatedAt @db.Timestamptz(3)
+    readings   SensorReading[]
+    alerts     Alert[]
+}
+
+model SensorReading {
+    id              Int      @id @default(autoincrement())
+    deviceId        Int
+    temperatureC    Float
+    humidityPercent Float
+    waterDetected   Boolean
+    readingUid      String?
+    receivedAt      DateTime @default(now()) @db.Timestamptz(3)
+
+    device Device @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+    @@unique([deviceId, readingUid])
+    @@index([deviceId, receivedAt])
+}
+
+model Alert {
+    id        Int           @id @default(autoincrement())
+    deviceId  Int
+    type      AlertType
+    severity  AlertSeverity
+    status    AlertStatus   @default(OPEN)
+    message   String
+    startedAt DateTime      @default(now()) @db.Timestamptz(3)
+    clearedAt DateTime?     @db.Timestamptz(3)
+
+    device Device @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+    @@index([deviceId, startedAt])
+}
+
+enum AlertType {
+    HUMIDITY
+    WATER
+}
+
+enum AlertSeverity {
+    WARNING
+    CRITICAL
+}
+
+enum AlertStatus {
+    OPEN
+    CLEARED
 }

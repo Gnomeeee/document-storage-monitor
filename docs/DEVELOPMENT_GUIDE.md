@@ -1,204 +1,97 @@
-# DSMS Development
+# DSMS development guide
 
-> Companion to `SRS.md` and `ERD.md`. This guide explains how to begin **before purchasing the ESP32**, while keeping compatibility with Node.js, Express, REST APIs, and a React frontend.
+The agreed architecture is **ESP32 -> MQTT broker -> Node.js/Express -> PostgreSQL**, with **WebSocket between React and the backend**. The feature scope remains readings, local warnings, incident/history display and connectivity. See [COMMUNICATION.md](COMMUNICATION.md) for the proposed topic, payload, events and reconnect behavior.
 
-## 1. Architecture and responsibility boundaries
+## Current implementation
 
-```mermaid
-flowchart TB
-    subgraph DEVICE[ESP32 or temporary Node.js simulator]
-        DHT[DHT22 temperature and humidity]
-        WATER[Water-detection sensor]
-        FW[ESP32 firmware or simulator]
-        BUZ[Local buzzer on real ESP32]
-        DHT --> FW
-        WATER --> FW
-        FW --> BUZ
-    end
-    FW -->|POST /api/v1/readings| API[Node.js + Express REST API]
-    API --> DB[(PostgreSQL via Prisma)]
-    UI[React + Vite dashboard] -->|GET /api/v1/..| API
-```
+- Firmware: PlatformIO ESP32 Arduino C++ local prototype; GPIO4 DHT22, GPIO27 water input, GPIO26 passive simulated buzzer. No Wi-Fi/MQTT ingestion yet. Current RH >=60% immediate alarm is not the SRS timed qualification rule.
+- Backend: Prisma 7.10.1 packages, JavaScript ESM, three models and initial migration. Express app/server are not implemented. Migration application must be verified against the configured development database.
+- Frontend: React/Vite starter; no WebSocket dashboard yet.
+- Broker service and MQTT/WebSocket libraries: not configured/installed. No running integration is claimed.
 
-- **ESP32 firmware** reads sensors and activates local alerts even without Wi-Fi.
-- **Express backend** authenticates ingestion, validates readings, runs server alert rules, stores/retrieves data, and serves REST endpoints.
-- **PostgreSQL/Prisma** stores historical readings and incidents.
-- **React/Vite frontend** renders the data returned by Express; it never reads sensors or queries PostgreSQL directly.
+## Build one complete flow
 
-## 2. Exact first steps on Windows PowerShell
+1. Verify local PostgreSQL connection, review existing migration state and register DOC-ROOM-01. Add the remaining integrity constraints through a follow-up migration (see ERD).
+2. Select and configure an MQTT broker, per-device credentials, authorized topic ACLs, and a backend subscriber account. Keep credentials out of Git/frontend. Broker product is still a choice; Eclipse Mosquitto is one option to evaluate.
+3. Implement backend MQTT message handling with Zod validation, topic/code matching, device lookup and readingUid deduplication. Keep processing in a shared ingestion service rather than transport callbacks alone.
+4. Publish one simulated reading through a temporary Node.js MQTT script. Verify its persisted values before building UI logic.
+5. Implement transactional incident creation/escalation/clearance, qualification and missing-data rules. Use controlled-clock tests for duration rules.
+6. Implement WebSocket snapshot/history requests and live updates after commit. Add message limits, Origin checks, bounded history, heartbeat, reconnect, and snapshot/event reconciliation.
+7. Build React cards, history and incident list against these actual messages. No REST polling or SSE is required for the chosen dashboard transport.
+8. Test broker/database outages, duplicates, malformed data and browser reconnection.
+9. Separately verify physical modules in Serial Monitor, then add Wi-Fi/MQTT to ESP32 with the same topic/payload contract. Do not block local sensing while reconnecting.
 
-Verify existing tools before installation:
+First milestone: **one simulated MQTT reading saved in PostgreSQL**. Next extend it to WebSocket/React, then replace the publisher with the real ESP32.
 
-```powershell
-node --version
-npm --version
-git --version
-```
+## Configuration and tooling
 
-A supported current **Node.js LTS** version is recommended; confirm supported versions for your chosen Vite and Prisma versions.
+Run commands from the component directory containing package.json/platformio.ini. Backend uses Node.js with Prisma 7; check the locked packages' engine requirements when choosing the runtime. The inspected local runtime was Node.js 24.22.1; PlatformIO Core 6.2.0 built the existing firmware in the earlier review. Do not infer hardware or integration success from those checks.
 
-Create the workspace:
+From backend/:
 
 ```powershell
-mkdir document-storage-monitor
-cd document-storage-monitor
-git init
-mkdir backend, firmware, docs
-npm create vite@latest frontend -- --template react
+npm ci
+npx prisma validate --config ./prisma7.config.ts
+npx prisma migrate status --config ./prisma7.config.ts
+npx prisma generate --config ./prisma7.config.ts
 ```
 
-Set up the React app:
+The config has a custom filename; keep --config unless it is deliberately renamed to prisma.config.ts. DATABASE_URL comes from backend/.env. The current generator is prisma-client-js with output src/generated/prisma; keep generated imports and the PostgreSQL driver adapter consistent with this setup.
+
+Only when creating the next reviewed development migration:
 
 ```powershell
-cd frontend
-npm install
-npm install recharts lucide-react
-cd ..
+npx prisma migrate dev --name enforce_monitoring_constraints --create-only --config ./prisma7.config.ts
 ```
 
-Set up a basic JavaScript Express API **before installing Prisma**:
+Review the generated SQL and add required constraints before applying with migrate dev. Even --create-only may detect drift and request a reset: inspect any such prompt, do not accept it blindly. Never edit an already-applied migration. Runtime database credentials and broker credentials are distinct.
+
+Existing backend `npm run dev` / `npm start` target the not-yet-implemented server. `npm test` is currently a failing placeholder, not a real suite. Add and document meaningful validation/ingestion/incident/socket tests during implementation. No backend build or lint script is currently configured.
+
+From frontend/:
 
 ```powershell
-cd backend
-npm init -y
-npm pkg set type=module
-npm pkg set "scripts.dev=nodemon src/server.js"
-npm pkg set "scripts.start=node src/server.js"
-npm install express cors dotenv zod
-npm install --save-dev nodemon
-mkdir src, scripts, tests
-mkdir src/routes, src/controllers, src/services, src/middleware
-cd ..
+npm ci
+npm run dev
+npm run build
+npm run lint
 ```
 
-Create `src/app.js`, `src/server.js`, and your first `/api/v1/health` route manually. Configure private-network access and CORS only for the frontend origin. Add `.env.example`, `.gitignore`, and `README.md` before committing.
+There is no frontend test script yet. These commands currently exercise the starter app, not a monitoring dashboard.
 
-## 3. Recommended dependency list
+From firmware/:
 
-| Package / tool                                                   | Stage                  | Purpose                             |
-| ---------------------------------------------------------------- | ---------------------- | ----------------------------------- |
-| `react`, `react-dom`, `vite`                                     | From frontend scaffold | Frontend application                |
-| `recharts`, `lucide-react`                                       | Early frontend         | Trends and icons                    |
-| Tailwind CSS                                                     | Optional later         | Styling; plain CSS works initially  |
-| `express`, `cors`, `dotenv`, `zod`                               | Start backend          | API, local config, validation       |
-| `nodemon` (dev-only)                                             | Start backend          | Auto-restart API on file changes    |
-| PostgreSQL server                                                | Database stage         | Persistent data                     |
-| `prisma`, `@prisma/client` and version-specific adapter packages | Database stage         | ORM, migrations and database access |
-| Postman or Bruno                                                 | API stage              | Manual REST testing                 |
-| PlatformIO or ESP-IDF tools                                      | Hardware stage         | ESP32 firmware build/upload         |
+```powershell
+pio run -e esp32dev
+```
 
-**Prisma version warning (important for 2026):** Prisma 7's default `prisma-client` generator emits TypeScript and uses a required output directory plus driver adapter for PostgreSQL. If you intend to stay in a JavaScript-only Express project, deliberately choose and document a compatible approach before installing database packages; alternatively use TypeScript for the backend. Follow the **same major-version** documentation for generator, adapter, configuration, and imports. Official: <https://www.prisma.io/docs/orm/v7>.
+See firmware/README.md for upload/monitor commands and the optional Wokwi scenario. The current simulation requires no broker because networking has not been added.
 
-## 4. Folder structure
+Proposed configuration names (not already wired into code): MQTT_URL, MQTT_USERNAME, MQTT_PASSWORD, PORT, ALLOWED_ORIGIN in backend; VITE_WS_URL in frontend; broker host/port and separate device credentials in private firmware configuration. Never place credentials in VITE_ variables.
+
+## Communication libraries and structure
+
+Choose one compatible browser/server combination: plain WebSocket (browser built-in API plus a server implementation), or Socket.IO on both sides. Socket.IO has its own wire protocol. For a strictly WebSocket transport requirement configure Socket.IO accordingly if selected. MQTT client choices must support the proposed publish QoS and nonblocking reconnect behavior. Do not install multiple competing transports just because examples mention them.
+
+Suggested new modules when implementing (not existing files):
 
 ```text
-document-storage-monitor/
-├── frontend/
-│   ├── src/components/
-│   ├── src/pages/
-│   ├── src/services/api.js
-│   ├── .env.example
-│   └── package.json
-├── backend/
-│   ├── prisma/schema.prisma
-│   ├── src/app.js
-│   ├── src/server.js
-│   ├── src/routes/
-│   ├── src/controllers/
-│   ├── src/services/
-│   ├── src/middleware/
-│   ├── scripts/simulate-device.js
-│   ├── tests/
-│   ├── .env.example
-│   └── package.json
-├── firmware/
-├── docs/
-│   ├── SRS.md
-│   ├── ERD.md
-│   └── DEVELOPMENT_GUIDE.md
-├── .gitignore
-└── README.md
+backend/src/mqtt/           broker connection and subscription handlers
+backend/src/websocket/     connections, requests and broadcast handling
+backend/src/services/      validation, ingestion, incidents and queries
+backend/scripts/           simulated MQTT publisher
+backend/tests/             automated contract and behavior tests
+frontend/src/services/     one managed WebSocket connection
 ```
 
-Create `docs/` contents by copying the companion files from this package. Do not commit `.env`, database passwords, device keys, `node_modules`, build directories, or firmware secrets.
+Express can retain a diagnostic HTTP health endpoint and serve static assets; that does not reintroduce REST sensor ingestion. Backend subscribes to telemetry only; remote device control is not included.
 
-## 5. How to work without hardware
+## Documentation and checks
 
-1. Implement `GET /api/v1/health` in Express.
-2. Implement `POST /api/v1/readings` with Zod and **in-memory storage** for the first API tests.
-3. Write `backend/scripts/simulate-device.js` to send the same JSON that an ESP32 will eventually produce.
-4. Verify valid, invalid, missing-key, wet, and prolonged-high-humidity scenarios in Postman/Bruno.
-5. Add PostgreSQL, Prisma, database migration, and a seed with device code `DOC-ROOM-01`.
-6. Build `GET /api/v1/dashboard/summary`, `GET /api/v1/readings`, and `GET /api/v1/alerts`.
-7. Build React dashboard cards/charts from the **actual API** rather than hard-coded mock values.
-8. Implement rule-engine unit tests with a fake clock so long-duration RH cases can be tested quickly.
-9. When parts arrive, compile ESP32 firmware and point HTTP POST to the laptop's LAN IP.
+- [SRS](SRS.md): requirements, thresholds and acceptance criteria.
+- [ERD](ERD.md): actual model names/fields and remaining constraints.
+- [Communication](COMMUNICATION.md): architecture, contracts and failure boundaries.
+- Preview Mermaid code blocks using a Markdown viewer with Mermaid support.
+- Record software-simulator results separately from physical readings. Verify broker permissions, persistence, duplicate handling, history, socket reconnect and independent local buzzer operation.
 
-### Simulator API body
-
-```json
-{
-  "deviceId": "DOC-ROOM-01",
-  "temperatureC": 28.4,
-  "humidityPercent": 68.2,
-  "waterDetected": false
-}
-```
-
-The local dev server endpoint is typically `http://localhost:3000/api/v1/readings` from a simulator running on your computer, but the actual ESP32 requires something like `http://192.168.x.x:3000/api/v1/readings` using **your laptop's real LAN IP** and a private-network firewall rule. Do not expose development secrets on the public internet.
-
-## 6. Creating a Mermaid ERD in VS Code
-
-### Option A — Built-in Markdown preview (recommended)
-
-Current VS Code (version **1.121 and later**) already has built-in Mermaid rendering. You do **not** need to install a separate extension for Mermaid fenced blocks in `.md` files.
-
-1. Open your repository in VS Code.
-2. Create `docs/ERD.md` or open the provided one.
-3. Add a Mermaid code fence:
-
-````markdown
-```mermaid
-erDiagram
-    DEVICE ||--o{ SENSOR_READING : records
-    DEVICE ||--o{ ALERT : generates
-```
-````
-
-4. Press **Ctrl+Shift+V** to open Markdown Preview. For side-by-side, press **Ctrl+K**, then **V**.
-5. The diagram renders. Edit the Mermaid text and save; the preview updates.
-
-### Option B — Older VS Code
-
-If the diagram displays as plain code, first check your VS Code version and whether its built-in `Mermaid Markdown Features` extension is enabled. If you're on a version older than 1.121, update VS Code or install a compatible Markdown Mermaid preview extension. The older `Markdown Preview Mermaid Support` extension was deprecated after its capabilities were merged into VS Code.
-
-### Mermaid relationship symbols
-
-- `||` — exactly one.
-- `o{` — zero or many.
-- `|{` — one or many.
-- Example `DEVICE ||--o{ SENSOR_READING : records` means **one device may have zero or many readings**, but **each reading belongs to exactly one device**.
-
-The ERD visualizes data design. Creating an ERD does **not** create PostgreSQL tables; write `schema.prisma` and run Prisma migrations when database integration begins.
-
-## 7. Recommended order of coding
-
-| Milestone             | Concrete completion check                                            |
-| --------------------- | -------------------------------------------------------------------- |
-| 1 — API               | Health endpoint and validated POST route return documented responses |
-| 2 — Simulator         | Script sends normal/warning/wet readings to Express                  |
-| 3 — Database          | Accepted readings persist through backend restart                    |
-| 4 — Alert rules       | Persistence, escalation, water detection, and recovery tests pass    |
-| 5 — Frontend          | Dashboard shows latest real API data and history                     |
-| 6 — Offline detection | UI marks stale/offline data appropriately                            |
-| 7 — ESP32             | Physical readings can replace simulator with no API rewrite          |
-| 8 — Validation        | Research experiments and acceptance tests documented                 |
-
-## 8. Source links
-
-- VS Code Markdown and Mermaid: <https://code.visualstudio.com/docs/languages/markdown>
-- VS Code 1.121 Mermaid integration: <https://code.visualstudio.com/updates/v1_121/>
-- Mermaid ERD syntax: <https://mermaid.js.org/syntax/entityRelationshipDiagram.html>
-- Prisma 7 version-specific documentation: <https://www.prisma.io/docs/orm/v7>
-
-**First goal:** Submit one simulated reading to Express, persist it, retrieve it over REST, and display it in a React card. The sensor hardware can come later.
+References: [MQTT](https://mqtt.org/), [WebSocket](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API), [Prisma 7](https://www.prisma.io/docs/orm/v7), [Socket.IO](https://socket.io/docs/v4/).
