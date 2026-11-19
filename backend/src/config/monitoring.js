@@ -1,7 +1,7 @@
 export const defaultRules = {
-  humidityWarningPercent: 60,
-  humidityCriticalPercent: 65,
-  humidityClearBelowPercent: 58,
+  humidityWarningPercent: 75.5,
+  humidityCriticalPercent: 80,
+  humidityClearBelowPercent: 73,
   warningMs: 30 * 60 * 1000,
   criticalMs: 15 * 60 * 1000,
   humidityClearMs: 10 * 60 * 1000,

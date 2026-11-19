@@ -4,7 +4,13 @@
 
 "The ESP32 reads the sensors and publishes through an MQTT broker. Our backend checks each message, saves it in PostgreSQL and updates alerts. It then sends the saved data to React over WebSocket. The dashboard displays that data; it does not create readings."
 
-The ESP32 publishing part is still pending in firmware. Backend and frontend code already use this flow.
+The ESP32, backend and frontend use this flow. The ESP32 needs the local network settings described in the [firmware setup](../firmware/README.md#connect-the-esp32-to-the-dashboard).
+
+## Start with the ESP32 loop
+
+Read `setup()` first. It configures the pins, starts the DHT22, and starts telemetry. Then read `loop()`. It checks water, takes a climate sample when one is due, and waits until the next sample or a water sensor change. `readWaterSensor()` reports wet immediately and reports dry after three continuous seconds without wet contact. A new wet signal restarts that timer. The humidity buzzer sounds for one second after two consecutive readings at or above 75.5% RH. Two readings below 73% rearm it. The dashboard receives the measured humidity on each valid sample. `reportStatus()` updates the buzzer, sends valid readings, and prints the serial output. [main.cpp](../firmware/src/main.cpp)
+
+For Wi-Fi, `queueTelemetry()` hands the reading to a background task that publishes it to MQTT. For a USB demo, the bridge reads the serial output and publishes it to the same MQTT topic. [telemetry.cpp](../firmware/src/telemetry.cpp), [USB bridge](../backend/scripts/bridge-usb.js)
 
 ## Follow one reading
 
@@ -27,13 +33,10 @@ The database transaction means a reading and its alert changes succeed together 
 src/
   server.js          Starts the process and handles shutdown
   startServer.js     Connects the database, MQTT and WebSocket
-  app.js             Registers Express routes and middleware
+  app.js             Defines the health endpoint and HTTP responses
   mqtt.js            Receives device messages
   websocket.js       Handles browser requests and updates
   config/            Environment, Prisma and monitoring settings
-  routes/            HTTP routes; currently health only
-  controllers/       HTTP response handlers
-  middleware/        HTTP headers and safe error responses
   services/          Database queries and alert logic
   validators/        Incoming MQTT/WebSocket message rules
   utils/             Shared errors and processing queue

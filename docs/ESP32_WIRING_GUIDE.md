@@ -63,7 +63,7 @@ With USB unplugged, connect the two-pin rain plate to the **two-pin probe connec
 | `GND` | E14 | A14 → blue `−` rail |
 | `VCC` | E15 | A15 → red `+` rail |
 
-Reconnect USB and reopen the monitor. Start with a clean, dry plate. Expect `Water detected: NO`. Put a small drop of water across two adjacent exposed traces on the **plate only**. Look for `Water detected: YES` and `ALARM: Water detected!`. Wipe the plate dry. The status should return to `NO` as soon as the LM393 reports dry. If the status flickers while wet, tune the LM393 threshold as described below.
+Reconnect USB and reopen the monitor. Start with a clean, dry plate. Expect `Water detected: NO`. Put a small drop of water across two adjacent exposed traces on the **plate only**. Look for `Water detected: YES` and `ALARM: Water detected!`. Wipe the plate dry. The status should return to `NO` after the LM393 reports dry for three continuous seconds. If the status flickers while wet, tune the LM393 threshold as described below.
 
 To detect smaller drops, adjust the LM393 threshold screw in small increments. Recheck both a dry plate and a small drop after each adjustment. Choose a setting where the dry plate stays `NO` and the drop gives `YES`. The adjustment direction can vary by module. The ESP32 sees only the module's digital output, so it depends on the plate and threshold to register the drop in the first place. Keep liquid away from the ESP32, breadboard, and control module.
 
@@ -77,7 +77,7 @@ Close the monitor and unplug USB. Put each buzzer pin on its own strip or use fe
 | `+` or `VCC` | E23 | A23 → red `+` rail |
 | `−` or `GND` | E24 | A24 → blue `−` rail |
 
-Reconnect USB and reopen the monitor. Wet the plate again and confirm that the monitor reports an alarm and the buzzer sounds. Wipe the plate dry. The buzzer should quiet down after the water status clears if the measured humidity is below 75.5%. If the buzzer stays on, check for the humidity alarm as well as the wet-plate alarm.
+Reconnect USB and reopen the monitor. Wet the plate again and confirm that the monitor reports an alarm and the buzzer sounds. Wipe the plate dry. The water buzzer should quiet down after three continuous dry seconds. Humidity produces a one-second beep after two readings at or above 75.5% RH. Two readings below 73% rearm it for another episode.
 
 The physical build is set for a low-trigger module. GPIO 26 drives `S` HIGH at idle and LOW during an alarm. For a confirmed high-trigger module, set `BUZZER_ACTIVE_HIGH` to `true` in [config.h](../firmware/include/config.h), then rebuild and upload. If the buzzer still sounds weak, check its 3.3 V rating and remove any shipping seal marked for removal.
 

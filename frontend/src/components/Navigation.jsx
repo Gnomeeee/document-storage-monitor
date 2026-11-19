@@ -1,27 +1,44 @@
-export default function Navigation({ page, pages }) {
+import { Archive, Bell, Cpu, LayoutDashboard, ListFilter, Server } from "lucide-react";
+import StatusBadge from "./StatusBadge.jsx";
+
+const icons = {
+  dashboard: LayoutDashboard,
+  readings: ListFilter,
+  alerts: Bell,
+  device: Cpu,
+};
+
+export default function Navigation({ page, pages, deviceCode, deviceStatus }) {
   return (
-    <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-6xl flex-col gap-4 px-4 pt-5 sm:px-6 md:flex-row md:items-center md:justify-between md:pt-0">
-        <a href="#dashboard" className="text-base font-semibold md:py-5">
-          Document Storage Monitor
-        </a>
-        <nav aria-label="Main navigation" className="flex gap-5 overflow-x-auto">
-          {Object.entries(pages).map(([id, label]) => (
-            <a
-              key={id}
-              href={`#${id}`}
-              aria-current={page === id ? "page" : undefined}
-              className={`border-b-2 py-4 text-sm ${
-                page === id
-                  ? "border-emerald-700 font-medium text-emerald-800"
-                  : "border-transparent text-slate-600 hover:text-slate-950"
-              }`}
-            >
+    <aside className="sidebar">
+      <a
+        href="#dashboard"
+        className="brand"
+        aria-label="Document Storage Monitor overview"
+      >
+        <span className="brand-mark">
+          <Archive size={21} aria-hidden="true" />
+        </span>
+        <span>Storage Monitor</span>
+      </a>
+      <nav aria-label="Main navigation" className="sidebar-nav">
+        {Object.entries(pages).map(([id, label]) => {
+          const Icon = icons[id];
+          return (
+            <a key={id} href={`#${id}`} aria-current={page === id ? "page" : undefined}>
+              <Icon size={18} aria-hidden="true" />
               {label}
             </a>
-          ))}
-        </nav>
+          );
+        })}
+      </nav>
+      <div className="sidebar-device">
+        <span className="sidebar-device-label">
+          <Server size={15} aria-hidden="true" /> Monitoring device
+        </span>
+        <strong translate="no">{deviceCode}</strong>
+        <StatusBadge status={deviceStatus} />
       </div>
-    </header>
+    </aside>
   );
 }

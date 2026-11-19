@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { planAlerts } from "../src/services/alerts.service.js";
 import { freshness } from "../src/services/dashboard.service.js";
-const rows = (minutes, humidity = 60, wet = false) =>
+const rows = (minutes, humidity = 75.5, wet = false) =>
   Array.from({ length: minutes + 1 }, (_, i) => ({
     receivedAt: new Date(i * 60000),
     humidityPercent: humidity,
@@ -11,12 +11,12 @@ const rows = (minutes, humidity = 60, wet = false) =>
 test("humidity requires elapsed qualifying observations, including threshold equality", () => {
   assert.deepEqual(planAlerts(rows(29), []), []);
   assert.equal(planAlerts(rows(30), [])[0].severity, "WARNING");
-  assert.deepEqual(planAlerts(rows(14, 65), []), []);
-  assert.equal(planAlerts(rows(15, 65), [])[0].severity, "CRITICAL");
+  assert.deepEqual(planAlerts(rows(14, 80), []), []);
+  assert.equal(planAlerts(rows(15, 80), [])[0].severity, "CRITICAL");
 });
 test("qualification resets on low reading and gaps; restart reconstruction has no memory dependency", () => {
   const history = rows(30);
-  history[20].humidityPercent = 59.9;
+  history[20].humidityPercent = 75.4;
   assert.deepEqual(planAlerts(history, []), []);
   assert.deepEqual(
     planAlerts([rows(0)[0], { ...rows(0)[0], receivedAt: new Date(1800000) }], []),
@@ -27,14 +27,14 @@ test("qualification resets on low reading and gaps; restart reconstruction has n
     planAlerts(JSON.parse(JSON.stringify(rows(30))), []),
   );
 });
-test("humidity escalates same incident, never downgrades; recovery needs below 58 for 10 minutes", () => {
+test("humidity escalates same incident, never downgrades; recovery needs below 73 for 10 minutes", () => {
   const warning = { id: 2, type: "HUMIDITY", severity: "WARNING" };
-  assert.equal(planAlerts(rows(15, 65), [warning])[0].action, "escalate");
+  assert.equal(planAlerts(rows(15, 80), [warning])[0].action, "escalate");
   const critical = { ...warning, severity: "CRITICAL" };
   assert.deepEqual(planAlerts(rows(30), [critical]), []);
-  assert.deepEqual(planAlerts(rows(10, 58), [critical]), []);
-  assert.deepEqual(planAlerts(rows(9, 57), [critical]), []);
-  assert.deepEqual(planAlerts(rows(10, 57), [critical]), [{ action: "clear", id: 2 }]);
+  assert.deepEqual(planAlerts(rows(10, 73), [critical]), []);
+  assert.deepEqual(planAlerts(rows(9, 72.9), [critical]), []);
+  assert.deepEqual(planAlerts(rows(10, 72.9), [critical]), [{ action: "clear", id: 2 }]);
 });
 test("water opens immediately, stays unique, clears after dry observations and can coexist with humidity", () => {
   assert.equal(planAlerts(rows(0, 50, true), [])[0].type, "WATER");
@@ -45,7 +45,7 @@ test("water opens immediately, stays unique, clears after dry observations and c
     { receivedAt: new Date(10000), humidityPercent: 50, waterDetected: false },
   ];
   assert.deepEqual(planAlerts(dry, [open]), [{ action: "clear", id: 3 }]);
-  assert.equal(planAlerts(rows(30, 60, true), []).length, 2);
+  assert.equal(planAlerts(rows(30, 75.5, true), []).length, 2);
 });
 test("freshness boundaries and no-data are independent from alert severity", () => {
   assert.equal(freshness(null, new Date()), "NO_DATA");

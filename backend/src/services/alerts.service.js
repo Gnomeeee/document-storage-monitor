@@ -31,15 +31,15 @@ export function planAlerts(readings, openAlerts, rules = defaultRules) {
   }
 
   const criticalHumidity = qualifies(
-    (reading) => reading.humidityPercent >= defaultRules.humidityCriticalPercent,
+    (reading) => reading.humidityPercent >= rules.humidityCriticalPercent,
     rules.criticalMs,
   );
   const warningHumidity = qualifies(
-    (reading) => reading.humidityPercent >= defaultRules.humidityWarningPercent,
+    (reading) => reading.humidityPercent >= rules.humidityWarningPercent,
     rules.warningMs,
   );
   const humidityRecovered = qualifies(
-    (reading) => reading.humidityPercent < defaultRules.humidityClearBelowPercent,
+    (reading) => reading.humidityPercent < rules.humidityClearBelowPercent,
     rules.humidityClearMs,
   );
 

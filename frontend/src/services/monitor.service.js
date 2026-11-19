@@ -1,4 +1,13 @@
-export function mergeRecords(existing, incoming, dateField, limit = 500) {
+const HISTORY_LIMIT = 500;
+const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
+const SOCKET_OPEN = 1;
+
+const historyDateFields = {
+  readings: "receivedAt",
+  alerts: "startedAt",
+};
+
+export function mergeRecords(existing, incoming, dateField, limit = HISTORY_LIMIT) {
   const records = new Map(existing.map((record) => [record.id, record]));
 
   for (const record of incoming) {
@@ -67,9 +76,10 @@ export function createMonitorClient({
   }
 
   function sendRequest(type, payload, loadHistoryAfter = false) {
-    if (socket?.readyState !== 1) return;
+    if (socket?.readyState !== SOCKET_OPEN) return;
 
-    const requestId = `request-${++requestNumber}`;
+    requestNumber += 1;
+    const requestId = `request-${requestNumber}`;
     const request = { type, payload, loadHistoryAfter, liveRecords: [] };
 
     request.timer = setTimeout(() => {
@@ -97,29 +107,35 @@ export function createMonitorClient({
     updateLoading();
   }
 
+  function historyCutoff() {
+    return Date.now() - state.rangeHours * MILLISECONDS_PER_HOUR;
+  }
+
   function loadHistory() {
     for (const [requestId, request] of pendingRequests) {
       if (request.type !== "dashboard.get") removeRequest(requestId);
     }
 
     updateState({ historyError: null });
-    const from = new Date(Date.now() - state.rangeHours * 3600000).toISOString();
-    const filter = { deviceCode, from, limit: 500 };
+    const from = new Date(historyCutoff()).toISOString();
+    const filter = { deviceCode, from, limit: HISTORY_LIMIT };
 
     sendRequest("readings.get", filter);
     sendRequest("alerts.get", filter);
   }
 
-  function addLiveRecord(kind, record, dateField) {
-    for (const request of pendingRequests.values()) {
-      const matchesRequest = request.type === `${kind}.get`;
-      const matchesPeriod =
-        Date.parse(record[dateField]) >= Date.parse(request.payload.from);
+  function addLiveRecord(kind, record) {
+    const dateField = historyDateFields[kind];
+    const recordTime = Date.parse(record[dateField]);
 
-      if (matchesRequest && matchesPeriod) request.liveRecords.push(record);
+    for (const request of pendingRequests.values()) {
+      if (request.type !== `${kind}.get`) continue;
+      if (recordTime >= Date.parse(request.payload.from)) {
+        request.liveRecords.push(record);
+      }
     }
 
-    const cutoff = Date.now() - state.rangeHours * 3600000;
+    const cutoff = historyCutoff();
     const records = mergeRecords(state[kind], [record], dateField);
     updateState({
       [kind]: records.filter((item) => Date.parse(item[dateField]) >= cutoff),
@@ -167,7 +183,7 @@ export function createMonitorClient({
       case "alerts.result": {
         const kind = type === "readings.result" ? "readings" : "alerts";
         if (request?.type !== `${kind}.get` || !Array.isArray(payload.items)) break;
-        const dateField = kind === "readings" ? "receivedAt" : "startedAt";
+        const dateField = historyDateFields[kind];
 
         // Live updates received during the query take precedence over its results.
         updateState({
@@ -177,14 +193,14 @@ export function createMonitorClient({
       }
 
       case "reading.created":
-        addLiveRecord("readings", payload.reading, "receivedAt");
+        addLiveRecord("readings", payload.reading);
         if (state.snapshot) {
           updateState({ snapshot: { ...state.snapshot, latest: payload.reading } });
         }
         break;
 
       case "alert.changed":
-        addLiveRecord("alerts", payload.alert, "startedAt");
+        addLiveRecord("alerts", payload.alert);
         break;
 
       case "device.status":

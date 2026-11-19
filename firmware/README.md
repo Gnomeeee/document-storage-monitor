@@ -1,42 +1,42 @@
-# Firmware and Wokwi simulator
+# ESP32 firmware
 
-This is the local sensor learning prototype, not the completed SRS implementation.
-It reads the DHT22, interprets a switch as a digital water probe, and sounds a
-buzzer for water or immediate RH >= 75.5%. Water alarms remain usable on DHT failure.
-Wi-Fi/MQTT publication, timed humidity qualification, debounce, and recovery timers
-are still future work. DHT reads are scheduled at least two seconds apart.
-Changes on GPIO 27 wake the monitor between readings, including during the
-two-second sensor startup period.
+The physical ESP32 reads the DHT22 and water sensor, drives the local buzzer, and sends valid readings to the dashboard. See the [wiring guide](../docs/ESP32_WIRING_GUIDE.md) for the physical connections.
 
-## Planned communication
+## Connect the ESP32 to the dashboard
 
-The selected device path is ESP32 -> MQTT broker -> backend; React communicates
-with the backend through WebSocket. Firmware networking is not implemented yet.
-See [communication contracts](../docs/COMMUNICATION.md) for the proposed topic,
-payload, broker authentication, deduplication and failure behavior. Preserve
-local monitoring during broker/network outages. No HTTP sensor upload is planned.
+1. Set up PostgreSQL, the MQTT broker, and the backend using the [backend guide](../backend/README.md). Register the device and start the backend before testing the dashboard. The default broker account for the ESP32 is `DOC-ROOM-01`.
+2. Make MQTT reachable from the ESP32 on your private Wi-Fi network. The checked-in broker configuration listens on loopback. To keep backend access on loopback and also serve the ESP32, add a second `listener 1883 <broker-LAN-IP>` to the active Mosquitto configuration. Keep password authentication and the topic ACL on both listeners. If Windows Firewall blocks the connection, allow inbound MQTT only from the private LAN or the ESP32's address. Never use `localhost` as the broker address on the ESP32.
+3. From `firmware/`, create the ignored header if it does not already exist:
 
-## Structure
+   ```powershell
+   Copy-Item include/network_secrets.example.h include/network_secrets.h
+   ```
 
-- `src/main.cpp`: setup, readings, buzzer control, serial output.
-- `include/config.h`: pins and initial learning thresholds.
-- `platformio.ini`: ESP32 Arduino framework and DHT library build configuration.
-- `diagram.json`: arranged simulator components, connections, and equipment labels.
-- `wokwi.toml`: compiled binary paths for the VS Code simulator.
-- `docs/HARDWARE.md`: every physical item in SRS Appendix A and its representation.
-- `test/MANUAL_TESTS.md`: repeatable simulator checks.
-- `test/scenarios/dht22.yaml`: automated Wokwi regression for real sensor readings.
-- `lib/`: reserved for project libraries; none required yet.
+4. Open `include/network_secrets.h` locally. Set the SSID and password of the ESP32's 2.4 GHz network, the broker URI (for example `mqtt://192.168.1.10:1883`), the registered device code, and the **device** broker account credentials. Across untrusted networks, use `mqtts://` and supply the broker CA in `DSMS_MQTT_CA_PEM`.
+5. Close any serial monitor and flash the device:
 
-## Setup and run
+   ```powershell
+   pio run -e esp32dev -t upload --upload-port COM3
+   pio device monitor --port COM3 --baud 115200
+   ```
 
-Install VS Code, PlatformIO IDE, and Wokwi Simulator extensions. Complete any
-Wokwi account/license setup requested by the extension. Open this `firmware`
-folder in VS Code, then use PlatformIO Build (checkmark). Open the command
-palette and run `Wokwi: Start Simulator`. Stop and restart after diagram edits;
-rebuild and restart after C++ or header edits.
+6. Look for `MQTT connected.` and valid temperature/humidity readings. Start the frontend from its own folder with `npm.cmd run dev`, then open `http://localhost:5173`. Confirm the latest reading updates. Wet and dry the plate to check that the water card follows the sensor. An open backend water alert clears according to the backend recovery rule.
 
-From a PlatformIO terminal, with this folder as the working directory:
+Missing network settings disable telemetry. The buzzer and serial monitoring still work locally.
+
+## USB connection for a Windows demo
+
+Use USB when the broker is local to the PC or the ESP32 lacks Wi-Fi credentials. Plug in the ESP32, confirm its COM port and close any serial monitor. From `backend/`, run:
+
+```powershell
+npm.cmd run bridge:usb -- COM3
+```
+
+The bridge uses PlatformIO's Python environment to read valid sensor frames at 115200 baud and publishes them to the existing MQTT broker with the device account from `backend/.env`. Use `DEVICE_MQTT_USERNAME`, `DEVICE_MQTT_PASSWORD`, and `DEVICE_CODE`, or the existing `SIM_MQTT_*` and `SIM_DEVICE_CODE` settings for the same device account. Set `PIO_PYTHON` to the path of PlatformIO's Python if you installed it outside the default location. Keep MQTT publishing on either the ESP32 or the USB bridge for a given device. Stop the bridge with **Ctrl+C** before flashing or opening a serial monitor.
+
+## Build and check the physical board
+
+Open the `firmware` folder in VS Code with the PlatformIO extension installed. Run these commands from that folder:
 
 ```powershell
 pio run -e esp32dev
@@ -44,76 +44,13 @@ pio run -e esp32dev -t upload
 pio device monitor -b 115200
 ```
 
-Only the first command is needed for simulation. Upload and device monitor are
-for a connected physical board. PlatformIO Core 6.x installs the pinned
-Espressif32 8.0.0 / Arduino-ESP32 3.3.12 toolchain, Adafruit DHT 1.4.7, and
-Adafruit Unified Sensor 1.1.15. Node.js is not required. There is no separate
-C++ lint command. Run the manual tests after a successful build.
+Check that the serial monitor shows temperature, humidity, and water status. With the humidity alarm clear, wet the plate and confirm the buzzer sounds. Lift and touch the wet plate again within three seconds. Expect one continuous wet indication. Wipe the plate and leave it dry for three seconds to clear the water state.
 
-If `pio` is not on PATH, use the PlatformIO terminal in VS Code, or on this
-Windows installation run:
+The DHT22 takes a sample every 2.5 seconds. Two consecutive valid samples at or above 75.5% RH turn the humidity alarm on. Two below 73% RH clear it. A failed sample restarts confirmation and preserves the previous alarm state. The dashboard shows measured humidity, and humidity produces one one-second beep per episode. The water alarm sounds continuously while wet.
 
-```powershell
-& "$env:USERPROFILE/.platformio/penv/Scripts/platformio.exe" run -e esp32dev
-```
+## Source files
 
-## DHT22 timeout repair
-
-The previous DHTesp read path returned TIMEOUT repeatedly. This version replaces
-it with the Adafruit driver used in Wokwi's own ESP32/DHT22 regression project.
-The driver initializes the data pin, sends a precisely timed request, reads the
-reply, and verifies its checksum. `readHumidity()` and `readTemperature()` share
-one transaction; they do not request two measurements back to back.
-
-Both the firmware and simulated ESP32 now specify 240 MHz, matching that
-reference project. The first read waits two seconds for startup; later reads
-are at least two seconds apart. Invalid or out-of-range values produce a fault and are
-retried next time. They are never replaced with made-up temperature/humidity.
-Water detection remains independent of the DHT result.
-
-The precise cause of the old timeout has not been established by a signal trace.
-These changes align the driver and clock configuration with the simulator's
-reference rather than assuming the earlier GPIO initialization workaround fixed it.
-
-On restart, look for `DHT22 driver: Adafruit 1.4.7` and `ESP32 CPU: 240 MHz`.
-If those lines are absent, the simulator is running an older binary: build this
-folder and restart Wokwi. After startup, the default sensor settings should give:
-
-```text
-Temperature: 28.0 C
-Humidity: 50.0 %
-STATUS: NORMAL
-```
-
-References:
-- [Wokwi's ESP32/DHT22 test](https://github.com/wokwi/wokwi-part-tests/tree/main/wokwi-dht22/dht22-esp32)
-- [Adafruit DHT driver](https://github.com/adafruit/DHT-sensor-library)
-
-## Automated simulator regression (optional CLI)
-
-With Wokwi CLI installed and your own `WOKWI_CLI_TOKEN` configured outside source
-control, run from `firmware/`:
-
-```powershell
-pio run -e wokwi
-wokwi-cli . --scenario test/scenarios/dht22.yaml --timeout 30000 --fail-text "FAULT: DHT22"
-```
-
-Use the default diagram with the water switch dry. The scenario requires two
-valid readings, changes both sensor values, checks the humidity alarm, and tests
-negative temperature and recovery. A build alone cannot pass these runtime checks.
-See [Wokwi CLI setup](https://docs.wokwi.com/wokwi-ci/cli-usage).
-
-## Using the simulation
-
-Build with `pio run -e wokwi` before launching Wokwi. This environment drives
-the simulator's passive piezo with a tone.
-
-Click DHT22 to change temperature and humidity. Flip the water switch and read
-`Water detected: YES/NO` to identify its state. The unconnected switch terminal is
-dry because INPUT_PULLUP holds GPIO 27 high; grounding it represents wet.
-Temperature and humidity update about every two seconds. Wet and dry changes
-update the water status without a firmware hold. The buzzer follows the water
-state unless a humidity alarm also keeps it on.
-
-See [hardware mapping](docs/HARDWARE.md) and [manual tests](test/MANUAL_TESTS.md).
+- `src/main.cpp` reads the sensors and controls the buzzer.
+- `src/telemetry.cpp` sends valid readings over MQTT.
+- `include/config.h` sets the pins, alarm threshold, and timing.
+- `platformio.ini` defines the physical ESP32 build.

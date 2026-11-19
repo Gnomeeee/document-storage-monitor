@@ -25,6 +25,9 @@ test("health reports dependency failures safely and unknown routes return JSON",
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   assert.equal(response.headers.get("x-powered-by"), null);
+  const options = await fetch(`${base}/api/v1/health`, { method: "OPTIONS" });
+  assert.equal(options.status, 200);
+  assert.equal(options.headers.get("allow"), "GET, HEAD");
   mqttState.subscribed = false;
   response = await fetch(`${base}/api/v1/health`);
   assert.equal(response.status, 503);

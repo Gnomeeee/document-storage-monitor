@@ -21,3 +21,25 @@ export function downloadCsv(filename, rows) {
 
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+export function downloadReadingsCsv(readings, deviceCode) {
+  const rows = readings.map((reading) => [
+    deviceCode,
+    reading.receivedAt,
+    reading.temperatureC,
+    reading.humidityPercent,
+    reading.waterDetected,
+    reading.readingUid,
+  ]);
+  downloadCsv("readings.csv", [
+    [
+      "Device",
+      "Received at (UTC)",
+      "Temperature (C)",
+      "Humidity (%)",
+      "Water detected",
+      "Reading UID",
+    ],
+    ...rows,
+  ]);
+}

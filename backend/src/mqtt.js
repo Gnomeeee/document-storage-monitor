@@ -48,61 +48,75 @@ export function connectMqtt({
   client.on("error", () => {
     state.lastError = "BROKER_ERROR";
   });
-  let windowStart = Date.now(),
-    count = 0;
+  let windowStart = Date.now();
+  let messageCount = 0;
+
+  function rejectReading(code) {
+    state.rejected++;
+    state.lastError = code;
+  }
+
+  async function saveAndBroadcast(reading) {
+    const result = await readings.ingest(reading);
+    if (result.duplicate) {
+      state.duplicates++;
+      return;
+    }
+
+    state.accepted++;
+    state.lastError = null;
+    const deviceCode = reading.deviceId;
+    broadcast("reading.created", { deviceCode, reading: result.reading });
+
+    for (const alert of result.alerts) {
+      broadcast("alert.changed", { deviceCode, alert });
+    }
+
+    try {
+      const snapshot = await dashboard.snapshot(deviceCode);
+      broadcast("dashboard.snapshot", snapshot);
+    } catch {
+      logger.warn(
+        "Dashboard refresh unavailable; request a fresh snapshot on reconnect.",
+      );
+    }
+  }
+
   client.on("message", (topic, bytes, packet) => {
     if (Date.now() - windowStart > 60000) {
       windowStart = Date.now();
-      count = 0;
+      messageCount = 0;
     }
-    if (++count > 600) {
-      state.rejected++;
-      state.lastError = "RATE_LIMITED";
+
+    messageCount++;
+    if (messageCount > 600) {
+      rejectReading("RATE_LIMITED");
       return;
     }
+
     let reading;
     try {
       reading = parseReading(topic, bytes, packet.retain);
     } catch (error) {
-      state.rejected++;
-      state.lastError = publicError(error).code;
+      rejectReading(publicError(error).code);
       return;
     }
-    queue
-      .run(async () => {
-        const result = await readings.ingest(reading);
-        if (result.duplicate) {
-          state.duplicates++;
-          return;
-        }
-        state.accepted++;
-        state.lastError = null;
-        broadcast("reading.created", {
-          deviceCode: reading.deviceId,
-          reading: result.reading,
-        });
-        for (const alert of result.alerts)
-          broadcast("alert.changed", { deviceCode: reading.deviceId, alert });
 
-        try {
-          const snapshot = await dashboard.snapshot(reading.deviceId);
-          broadcast("dashboard.snapshot", snapshot);
-        } catch {
-          logger.warn(
-            "Dashboard refresh unavailable; request a fresh snapshot on reconnect.",
-          );
-        }
-      })
+    queue
+      .run(() => saveAndBroadcast(reading))
       .catch((error) => {
-        state.rejected++;
-        state.lastError = publicError(error).code;
+        rejectReading(publicError(error).code);
         logger.warn(`MQTT ingestion failed: ${state.lastError}`);
       });
   });
+
   let closing;
-  return {
-    state,
-    client,
-    close: () => (closing ??= new Promise((resolve) => client.end(true, {}, resolve))),
-  };
+  function close() {
+    if (!closing) {
+      closing = new Promise((resolve) => client.end(true, {}, resolve));
+    }
+    return closing;
+  }
+
+  return { state, client, close };
 }

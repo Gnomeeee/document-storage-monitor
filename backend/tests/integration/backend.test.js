@@ -351,7 +351,7 @@ test(
     assert.equal(snapshot.payload.environmentalRisk, "CRITICAL");
     assert.equal(snapshot.payload.connectivity, "OFFLINE");
     assert.equal(snapshot.payload.monitoringRules.warningMs, env.WARNING_AFTER_MS);
-    assert.equal(snapshot.payload.monitoringRules.humidityCriticalPercent, 65);
+    assert.equal(snapshot.payload.monitoringRules.humidityCriticalPercent, 80);
     await promisify(execFile)(
       process.execPath,
       ["scripts/simulate-device.js", "warning"],
@@ -387,7 +387,10 @@ test(
         },
       },
     });
-    assert.equal(simulated.humidityPercent, 62);
+    assert.equal(
+      simulated.humidityPercent,
+      snapshot.payload.monitoringRules.humidityWarningPercent,
+    );
     assert.equal(simulated.waterDetected, false);
     await backend.mqtt.close();
     await waitFor(() => !backend.mqtt.state.connected);

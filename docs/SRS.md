@@ -542,10 +542,7 @@ document-storage-monitor/
 ├── backend/
 │   ├── prisma/schema.prisma
 │   ├── src/
-│   │   ├── routes/
-│   │   ├── controllers/
 │   │   ├── services/
-│   │   ├── middleware/
 │   │   ├── app.js
 │   │   └── server.js
 │   ├── scripts/simulate-device.js

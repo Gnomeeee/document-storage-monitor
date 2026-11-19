@@ -34,22 +34,27 @@ export default function Alerts({ monitor }) {
 
   return (
     <section className="panel">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-5">
-        <h2 className="font-semibold">Alert history</h2>
+      <header className="panel-header">
+        <div>
+          <h2>Recorded incidents</h2>
+          <p>{filteredAlerts.length} matching records in this period</p>
+        </div>
         <button
-          className="btn"
+          className="btn btn-primary"
+          type="button"
           disabled={!filteredAlerts.length || historyLoading}
           onClick={exportAlerts}
         >
-          <Download size={16} />
+          <Download size={16} aria-hidden="true" />
           Export loaded CSV
         </button>
-      </div>
+      </header>
 
-      <div className="flex flex-wrap gap-4 p-5">
+      <div className="table-filters">
         <label className="flex items-center gap-2 text-sm">
           Status
           <select
+            name="alert-status"
             className="form-select"
             value={status}
             onChange={(event) => setStatus(event.target.value)}
@@ -62,6 +67,7 @@ export default function Alerts({ monitor }) {
         <label className="flex items-center gap-2 text-sm">
           Type
           <select
+            name="alert-type"
             className="form-select"
             value={type}
             onChange={(event) => setType(event.target.value)}
@@ -74,32 +80,47 @@ export default function Alerts({ monitor }) {
       </div>
 
       {filteredAlerts.length > 0 ? (
-        <div className="max-h-[36rem] overflow-auto">
+        <div
+          className="table-scroll alert-table-scroll"
+          role="region"
+          aria-label="Recorded incidents table"
+          tabIndex={0}
+        >
           <table>
             <caption className="sr-only">
               Alert history. Times are in Philippine time.
             </caption>
             <thead>
               <tr>
-                <th>Type</th>
-                <th>Severity</th>
-                <th>Status</th>
-                <th>Started (PHT)</th>
-                <th>Cleared (PHT)</th>
+                <th scope="col">Type</th>
+                <th scope="col">Severity</th>
+                <th scope="col">Status</th>
+                <th scope="col">Started (PHT)</th>
+                <th scope="col">Cleared (PHT)</th>
               </tr>
             </thead>
             <tbody>
               {filteredAlerts.map((alert) => (
                 <tr key={alert.id}>
-                  <td>{alert.type === "WATER" ? "Water" : "Humidity"}</td>
-                  <td>
+                  <td data-label="Type">
+                    {alert.type === "WATER" ? "Water" : "Humidity"}
+                  </td>
+                  <td data-label="Severity">
                     <StatusBadge status={alert.severity} />
                   </td>
-                  <td>
+                  <td data-label="Status">
                     <StatusBadge status={alert.status} />
                   </td>
-                  <td>{timestamp(alert.startedAt)}</td>
-                  <td>{alert.clearedAt ? timestamp(alert.clearedAt) : "Not cleared"}</td>
+                  <td data-label="Started (PHT)">
+                    <time dateTime={alert.startedAt}>{timestamp(alert.startedAt)}</time>
+                  </td>
+                  <td data-label="Cleared (PHT)">
+                    {alert.clearedAt ? (
+                      <time dateTime={alert.clearedAt}>{timestamp(alert.clearedAt)}</time>
+                    ) : (
+                      "Not cleared"
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -107,14 +128,23 @@ export default function Alerts({ monitor }) {
         </div>
       ) : (
         <EmptyState
-          title={historyLoading ? "Loading alerts..." : "No matching alerts"}
-          message={historyError || "Try a different period, status, or type."}
+          loading={historyLoading}
+          title={
+            historyError
+              ? "Alert history unavailable"
+              : historyLoading
+                ? "Loading alerts…"
+                : "No matching alerts"
+          }
+          message={
+            historyError ||
+            (historyLoading ? undefined : "Try a different period, status, or type.")
+          }
         />
       )}
 
       <p className="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">
-        {filteredAlerts.length} matching records. Up to 500 by start time. Older open
-        alerts remain on the dashboard.
+        Up to 500 alerts by start time. Older open alerts remain on the dashboard.
       </p>
     </section>
   );

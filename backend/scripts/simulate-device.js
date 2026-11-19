@@ -3,16 +3,17 @@ import mqtt from "mqtt";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { readingSchema } from "../src/validators/messages.js";
+import { defaultRules } from "../src/config/monitoring.js";
 config({ quiet: true });
 const scenario = process.argv[2] ?? "normal";
 const presets = {
   normal: [50, false],
-  warning: [62, false],
-  critical: [66, false],
-  humidity: [66, false],
+  warning: [defaultRules.humidityWarningPercent, false],
+  critical: [defaultRules.humidityCriticalPercent, false],
+  humidity: [defaultRules.humidityCriticalPercent, false],
   wet: [50, true],
   dry: [50, false],
-  both: [66, true],
+  both: [defaultRules.humidityCriticalPercent, true],
   recovery: [50, false],
 };
 if (
@@ -40,9 +41,7 @@ const client = mqtt.connect(process.env.MQTT_URL ?? "mqtt://127.0.0.1:1883", {
   clientId: `sim-${randomUUID()}`,
   reconnectPeriod: 0,
   connectTimeout: 10000,
-  ...(process.env.MQTT_CA_FILE
-    ? { ca: readFileSync(process.env.MQTT_CA_FILE) }
-    : {}),
+  ...(process.env.MQTT_CA_FILE ? { ca: readFileSync(process.env.MQTT_CA_FILE) } : {}),
 });
 const timer = setTimeout(() => {
   console.error("Publish timed out.");

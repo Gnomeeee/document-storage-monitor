@@ -22,7 +22,7 @@ Use a fresh readingUid per measurement and reuse it only when retrying that same
 
 Accepted values: temperature -20 to 80 C, humidity 0 to 100%, Boolean water state. The backend rejects invalid JSON, unexpected fields, oversized messages and retained replays.
 
-The firmware must publish actual sensor values. It must not replace a failed sensor reading with invented values. Wi-Fi/MQTT firmware is still pending.
+The firmware publishes each valid DHT22 sample and wet/dry changes using the latest valid DHT22 values. If the latest DHT22 sample is invalid or out of the backend's accepted range, publishing pauses and the local water alarm continues. The ESP32 uses an in-memory MQTT outbox for delivery retries. It does not create a durable backlog while disconnected.
 
 ## Backend to browser: WebSocket
 

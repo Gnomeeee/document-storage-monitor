@@ -1,10 +1,17 @@
-export default function EmptyState({ title, message }) {
+import { Inbox } from "lucide-react";
+
+export default function EmptyState({
+  title,
+  message,
+  icon: Icon = Inbox,
+  loading = false,
+}) {
   return (
-    <div className="px-5 py-12 text-center">
-      <p className="font-medium text-slate-800">{title}</p>
-      {message && (
-        <p className="mx-auto mt-2 max-w-md text-sm text-slate-600">{message}</p>
-      )}
+    <div className="empty-state" aria-busy={loading}>
+      <Icon size={22} strokeWidth={1.6} aria-hidden="true" />
+      <p>{title}</p>
+      {message && <small>{message}</small>}
+      {loading && <span aria-hidden="true" className="loading-line" />}
     </div>
   );
 }

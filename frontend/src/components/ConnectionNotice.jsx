@@ -1,38 +1,40 @@
+import { Info, WifiOff } from "lucide-react";
+
 export default function ConnectionNotice({ monitor }) {
   const { connection, snapshot, error, historyError, refresh } = monitor;
-  let message;
-
+  let title;
+  let detail;
   if (connection !== "connected") {
-    message = snapshot
-      ? "Disconnected. Showing last saved readings while the connection retries."
-      : "Connecting to the backend. No readings have been loaded.";
+    title =
+      connection === "disconnected" ? "Server disconnected" : "Connecting to server…";
+    detail = snapshot
+      ? "Showing the last saved measurements."
+      : "Waiting for the dashboard connection.";
   } else if (error) {
-    message = error;
+    title = "Room status unavailable";
   } else if (snapshot?.device.isActive === false) {
-    message = "This device is disabled. The backend is not accepting new readings.";
+    title = "Device disabled";
+    detail = "This device is no longer accepting readings.";
   } else if (snapshot?.connectivity === "NO_DATA") {
-    message = "No readings yet. Waiting for the device to send its first measurement.";
+    title = "Awaiting first reading";
   } else if (snapshot && snapshot.connectivity !== "ONLINE") {
-    message =
-      "No recent device readings. The values below are from the last saved measurement.";
+    title = snapshot.connectivity === "OFFLINE" ? "Device offline" : "Readings delayed";
+    detail = "Measurements below are from the last device report.";
   }
-
-  if (!message && !historyError) return null;
-
+  if (!title && !historyError) return null;
+  const Icon = connection === "disconnected" ? WifiOff : Info;
   return (
-    <div
-      className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950"
-      role="status"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="space-y-1">
-          {message && <p>{message}</p>}
-          {historyError && <p>History: {historyError}</p>}
-        </div>
-        <button className="font-medium underline underline-offset-4" onClick={refresh}>
-          Retry
-        </button>
+    <div className="connection-notice" role="status">
+      <Icon size={17} aria-hidden="true" />
+      <div>
+        <strong>{title || "History unavailable"}</strong>
+        {detail && <span>{detail}</span>}
+        {error && <span>{error}</span>}
+        {historyError && <span>{historyError}</span>}
       </div>
+      <button type="button" onClick={refresh}>
+        Retry
+      </button>
     </div>
   );
 }

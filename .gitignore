@@ -7,3 +7,4 @@
 !**/.env.example
 **/.env.local
 *.log
+firmware/include/network_secrets.h

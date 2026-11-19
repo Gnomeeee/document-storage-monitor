@@ -29,6 +29,14 @@ test("dashboard shows missing data as unknown and displays values received from 
     assert.match(html, /Alert status unavailable/);
     assert.doesNotMatch(html, /No open alerts/);
 
+    html = renderToStaticMarkup(
+      createElement(Dashboard, {
+        monitor: { ...empty, connection: "connecting", loading: true },
+      }),
+    );
+    assert.match(html, /Loading readings…/);
+    assert.doesNotMatch(html, /No readings in this period/);
+
     const reading = {
       id: 1,
       receivedAt: new Date().toISOString(),
@@ -58,8 +66,8 @@ test("dashboard shows missing data as unknown and displays values received from 
     };
 
     html = renderToStaticMarkup(createElement(Dashboard, { monitor, now: Date.now() }));
-    assert.match(html, /68.2/);
-    assert.match(html, /28.5/);
+    assert.match(html, />68\.2</);
+    assert.match(html, />28\.5</);
     assert.match(html, /Water detected/);
     assert.match(html, /Critical/);
 
@@ -73,9 +81,35 @@ test("dashboard shows missing data as unknown and displays values received from 
     html = renderToStaticMarkup(
       createElement(Dashboard, { monitor: changed, now: Date.now() }),
     );
-    assert.match(html, /32.7/);
-    assert.match(html, /51.4/);
-    assert.doesNotMatch(html, /68.2|28.5/);
+    assert.match(html, />32\.7</);
+    assert.match(html, />51\.4</);
+    assert.doesNotMatch(html, />(68\.2|28\.5)</);
+
+    const highHumidity = {
+      ...monitor,
+      snapshot: {
+        ...monitor.snapshot,
+        latest: {
+          ...reading,
+          waterDetected: false,
+          humidityPercent: 75.5,
+          temperatureC: 0,
+        },
+        monitoringRules: { humidityWarningPercent: 75.5 },
+        activeAlerts: [],
+        environmentalRisk: "NORMAL",
+      },
+    };
+    html = renderToStaticMarkup(createElement(Dashboard, { monitor: highHumidity }));
+    assert.match(html, /Humidity has reached the warning threshold/);
+    assert.match(html, /No open alerts/);
+    assert.match(html, />0\.0</);
+    html = renderToStaticMarkup(
+      createElement(Dashboard, {
+        monitor: { ...highHumidity, connection: "disconnected" },
+      }),
+    );
+    assert.doesNotMatch(html, /Humidity has reached the warning threshold/);
 
     html = renderToStaticMarkup(createElement(Alerts, { monitor }));
     assert.match(html, /Not cleared/);
