@@ -2,10 +2,11 @@
 
 This is the local sensor learning prototype, not the completed SRS implementation.
 It reads the DHT22, interprets a switch as a digital water probe, and sounds a
-buzzer for water or immediate RH >= 60%. Water alarms remain usable on DHT failure.
+buzzer for water or immediate RH >= 75.5%. Water alarms remain usable on DHT failure.
 Wi-Fi/MQTT publication, timed humidity qualification, debounce, and recovery timers
-are still future work. DHT reads are scheduled every 2.5 seconds while water is
-checked between readings, including during the two-second sensor startup period.
+are still future work. DHT reads are scheduled at least two seconds apart.
+Changes on GPIO 27 wake the monitor between readings, including during the
+two-second sensor startup period.
 
 ## Planned communication
 
@@ -66,7 +67,7 @@ one transaction; they do not request two measurements back to back.
 
 Both the firmware and simulated ESP32 now specify 240 MHz, matching that
 reference project. The first read waits two seconds for startup; later reads
-are 2.5 seconds apart. Invalid or out-of-range values produce a fault and are
+are at least two seconds apart. Invalid or out-of-range values produce a fault and are
 retried next time. They are never replaced with made-up temperature/humidity.
 Water detection remains independent of the DHT result.
 
@@ -94,6 +95,7 @@ With Wokwi CLI installed and your own `WOKWI_CLI_TOKEN` configured outside sourc
 control, run from `firmware/`:
 
 ```powershell
+pio run -e wokwi
 wokwi-cli . --scenario test/scenarios/dht22.yaml --timeout 30000 --fail-text "FAULT: DHT22"
 ```
 
@@ -104,11 +106,14 @@ See [Wokwi CLI setup](https://docs.wokwi.com/wokwi-ci/cli-usage).
 
 ## Using the simulation
 
+Build with `pio run -e wokwi` before launching Wokwi. This environment drives
+the simulator's passive piezo with a tone.
+
 Click DHT22 to change temperature and humidity. Flip the water switch and read
 `Water detected: YES/NO` to identify its state. The unconnected switch terminal is
 dry because INPUT_PULLUP holds GPIO 27 high; grounding it represents wet.
-Allow up to about 2.5 seconds for temperature/humidity updates. Water changes are
-checked between sensor transactions. The buzzer represents an audible warning,
-not the exact electrical behavior of a purchased active buzzer module.
+Temperature and humidity update about every two seconds. Wet and dry changes
+update the water status without a firmware hold. The buzzer follows the water
+state unless a humidity alarm also keeps it on.
 
 See [hardware mapping](docs/HARDWARE.md) and [manual tests](test/MANUAL_TESTS.md).

@@ -1,17 +1,10 @@
 import mqtt from "mqtt";
 import { readFileSync } from "node:fs";
-import { parseReading } from "../validators/messages.js";
-import { publicError } from "../lib/errors.js";
+import { parseReading } from "./validators/messages.js";
+import { publicError } from "./utils/errors.js";
 
-export function connectMqtt({
-  env,
-  queue,
-  readings,
-  dashboard,
-  broadcast,
-  logger = console,
-}) {
-  const state = {
+export function createMqttState() {
+  return {
     connected: false,
     subscribed: false,
     lastError: null,
@@ -19,6 +12,17 @@ export function connectMqtt({
     duplicates: 0,
     rejected: 0,
   };
+}
+
+export function connectMqtt({
+  env,
+  state = createMqttState(),
+  queue,
+  readings,
+  dashboard,
+  broadcast,
+  logger = console,
+}) {
   const client = mqtt.connect(env.MQTT_URL, {
     username: env.MQTT_USERNAME,
     password: env.MQTT_PASSWORD,
@@ -33,8 +37,7 @@ export function connectMqtt({
   client.on("connect", () => {
     state.connected = true;
     client.subscribe("dsms/+/readings", { qos: 1 }, (error, grants) => {
-      state.subscribed =
-        !error && grants?.length === 1 && grants[0].qos !== 128;
+      state.subscribed = !error && grants?.length === 1 && grants[0].qos !== 128;
       state.lastError = state.subscribed ? null : "SUBSCRIPTION_FAILED";
     });
   });
@@ -100,7 +103,6 @@ export function connectMqtt({
   return {
     state,
     client,
-    close: () =>
-      (closing ??= new Promise((resolve) => client.end(true, {}, resolve))),
+    close: () => (closing ??= new Promise((resolve) => client.end(true, {}, resolve))),
   };
 }

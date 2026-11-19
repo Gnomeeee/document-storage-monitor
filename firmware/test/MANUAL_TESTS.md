@@ -2,7 +2,7 @@
 
 Build first, then start Wokwi. Confirm `DHT22 driver: Adafruit 1.4.7` and
 `ESP32 CPU: 240 MHz` appear. Allow two seconds for startup and up to about
-2.5 seconds for each subsequent temperature/humidity update.
+two seconds plus the sensor transaction time for each subsequent temperature/humidity update.
 
 | Case | Action | Expected |
 | --- | --- | --- |
@@ -11,10 +11,12 @@ Build first, then start Wokwi. Confirm `DHT22 driver: Adafruit 1.4.7` and
 | Repeated readings | Leave 28 C / 50% unchanged for three samples | All samples valid, no recurring fault |
 | Temperature update | Set temperature to 31.5 C | Next sample reports 31.5 C, not a cached 28 C |
 | Signed temperature | Set temperature to -5.5 C | Next sample reports -5.5 C |
-| Threshold boundary | Dry switch; set RH to 59.9%, then 60.0% | NORMAL then humidity alarm |
+| Threshold boundary | Dry switch; set RH to 75.4%, then 75.5% | NORMAL then humidity alarm |
 | Water | RH 50%, switch wet | Water YES, water alarm, buzzer on |
-| Humidity | Switch dry, RH 65% | High humidity alarm, buzzer on |
-| Both | RH 65%, switch wet | Water alarm printed, humidity still displayed, buzzer on |
+| Rapid water changes | At RH 50%, switch wet, dry, then wet between humidity updates | The monitor shows YES, NO, then YES, and the buzzer follows each change |
+| Dry recovery | At RH 50%, switch dry after a wet alarm | Water switches to NO and buzzer turns off without a hold |
+| Humidity | Switch dry, RH 80% | High humidity alarm, buzzer on |
+| Both | RH 80%, switch wet | Water alarm printed, humidity still displayed, buzzer on |
 | Recovery | RH 50%, switch dry | NORMAL, buzzer off |
 | DHT fault | Stop; temporarily remove DHT SDA connection; restart | DHT fault, no fabricated measurement |
 | Water during fault | With DHT disconnected, switch wet | DHT fault AND water alarm, buzzer on |

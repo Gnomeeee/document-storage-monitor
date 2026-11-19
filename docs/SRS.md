@@ -368,7 +368,7 @@ The diagram describes environmental *rule state*; the database holds one inciden
 
 ## 7. MQTT and WebSocket specification
 
-[COMMUNICATION.md](COMMUNICATION.md) defines the proposed contracts and examples. MQTT broker product and WebSocket library are not selected by this specification. A plain WebSocket client cannot connect to Socket.IO without its corresponding protocol implementation.
+[COMMUNICATION.md](COMMUNICATION.md) defines the message contracts. The backend uses MQTT.js and ws; React uses the native browser WebSocket API. A Mosquitto broker configuration is provided. Physical MQTT publishing remains pending in firmware.
 
 ### 7.1 Device publications
 
@@ -510,7 +510,7 @@ These performance and quality targets are **proposed acceptance targets** for a 
 | Frontend | React + Vite + JavaScript | One-page responsive dashboard |
 | Frontend styling | CSS initially; Tailwind optional | Avoid front-loading unnecessary dependencies |
 | Data charts | Recharts | Temperature/RH time series |
-| Frontend communication | WebSocket | Snapshot/history requests and live events; library choice pending |
+| Frontend communication | Native WebSocket | Snapshot/history requests and live events; ws on the backend |
 | Device communication | MQTT broker and clients | Device credentials, topic ACLs, non-retained readings |
 | Backend runtime | Node.js LTS | ESM is suitable for JavaScript backend |
 | Backend framework | Express plus WebSocket server and MQTT subscriber | Diagnostic HTTP may remain |

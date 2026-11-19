@@ -1,102 +1,124 @@
-export const defaultRules = {
-  warningMs: 1800000,
-  criticalMs: 900000,
-  humidityClearMs: 600000,
-  waterClearMs: 10000,
-  gapMs: 180000,
-};
+import { defaultRules } from "../config/monitoring.js";
 
-function streakMs(readings, predicate, gapMs) {
-  const last = readings.at(-1);
-  if (!last || !predicate(last)) return -1;
-  let start = +new Date(last.receivedAt);
-  for (let i = readings.length - 2; i >= 0; i--) {
-    const time = +new Date(readings[i].receivedAt);
-    if (start - time > gapMs || !predicate(readings[i])) break;
-    start = time;
+function getContinuousDuration(readings, matchesCondition, maxGap) {
+  const latest = readings.at(-1);
+  if (!latest || !matchesCondition(latest)) return -1;
+
+  const latestTime = new Date(latest.receivedAt).getTime();
+  let startTime = latestTime;
+
+  for (let index = readings.length - 2; index >= 0; index--) {
+    const reading = readings[index];
+    const readingTime = new Date(reading.receivedAt).getTime();
+
+    if (startTime - readingTime > maxGap || !matchesCondition(reading)) break;
+    startTime = readingTime;
   }
-  return +new Date(last.receivedAt) - start;
+
+  return latestTime - startTime;
 }
 
 export function planAlerts(readings, openAlerts, rules = defaultRules) {
   const latest = readings.at(-1);
   if (!latest) return [];
+
   const changes = [];
-  const humidity = openAlerts.find((a) => a.type === "HUMIDITY");
-  const water = openAlerts.find((a) => a.type === "WATER");
-  const qualifies = (predicate, ms) =>
-    streakMs(readings, predicate, rules.gapMs) >= ms;
-  const critical = qualifies((r) => r.humidityPercent >= 65, rules.criticalMs);
-  const warning = qualifies((r) => r.humidityPercent >= 60, rules.warningMs);
-  if (critical || warning) {
-    const severity = critical ? "CRITICAL" : "WARNING";
-    if (!humidity)
+  const humidityAlert = openAlerts.find((alert) => alert.type === "HUMIDITY");
+  const waterAlert = openAlerts.find((alert) => alert.type === "WATER");
+
+  function qualifies(condition, duration) {
+    return getContinuousDuration(readings, condition, rules.gapMs) >= duration;
+  }
+
+  const criticalHumidity = qualifies(
+    (reading) => reading.humidityPercent >= defaultRules.humidityCriticalPercent,
+    rules.criticalMs,
+  );
+  const warningHumidity = qualifies(
+    (reading) => reading.humidityPercent >= defaultRules.humidityWarningPercent,
+    rules.warningMs,
+  );
+  const humidityRecovered = qualifies(
+    (reading) => reading.humidityPercent < defaultRules.humidityClearBelowPercent,
+    rules.humidityClearMs,
+  );
+
+  if (criticalHumidity || warningHumidity) {
+    if (!humidityAlert) {
       changes.push({
         action: "open",
         type: "HUMIDITY",
-        severity,
+        severity: criticalHumidity ? "CRITICAL" : "WARNING",
         message: "Sustained high humidity.",
       });
-    else if (critical && humidity.severity !== "CRITICAL")
+    } else if (criticalHumidity && humidityAlert.severity !== "CRITICAL") {
       changes.push({
         action: "escalate",
-        id: humidity.id,
+        id: humidityAlert.id,
         severity: "CRITICAL",
         message: "Humidity escalated to critical.",
       });
-  } else if (
-    humidity &&
-    qualifies((r) => r.humidityPercent < 58, rules.humidityClearMs)
-  )
-    changes.push({ action: "clear", id: humidity.id });
-  if (latest.waterDetected && !water)
+    }
+  } else if (humidityAlert && humidityRecovered) {
+    changes.push({ action: "clear", id: humidityAlert.id });
+  }
+
+  if (latest.waterDetected && !waterAlert) {
     changes.push({
       action: "open",
       type: "WATER",
       severity: "CRITICAL",
       message: "Water detected at the probe.",
     });
-  if (
-    !latest.waterDetected &&
-    water &&
-    qualifies((r) => !r.waterDetected, rules.waterClearMs)
-  )
-    changes.push({ action: "clear", id: water.id });
+  }
+
+  const waterRecovered = qualifies(
+    (reading) => !reading.waterDetected,
+    rules.waterClearMs,
+  );
+
+  if (waterAlert && waterRecovered) {
+    changes.push({ action: "clear", id: waterAlert.id });
+  }
+
   return changes;
 }
 
 export async function applyAlertChanges(
-  tx,
+  transaction,
   deviceId,
   readings,
   openAlerts,
   rules,
 ) {
-  const changed = [];
+  const savedAlerts = [];
   const now = readings.at(-1).receivedAt;
-  for (const change of planAlerts(readings, openAlerts, rules)) {
-    if (change.action === "open")
-      changed.push(
-        await tx.alert.create({
-          data: {
-            deviceId,
-            type: change.type,
-            severity: change.severity,
-            message: change.message,
-            startedAt: now,
-          },
-        }),
-      );
-    else
-      changed.push(
-        await tx.alert.update({
-          where: { id: change.id },
-          data:
-            change.action === "clear"
-              ? { status: "CLEARED", clearedAt: now }
-              : { severity: change.severity, message: change.message },
-        }),
-      );
+  const changes = planAlerts(readings, openAlerts, rules);
+
+  for (const change of changes) {
+    let alert;
+
+    if (change.action === "open") {
+      alert = await transaction.alert.create({
+        data: {
+          deviceId,
+          type: change.type,
+          severity: change.severity,
+          message: change.message,
+          startedAt: now,
+        },
+      });
+    } else {
+      const data =
+        change.action === "clear"
+          ? { status: "CLEARED", clearedAt: now }
+          : { severity: change.severity, message: change.message };
+
+      alert = await transaction.alert.update({ where: { id: change.id }, data });
+    }
+
+    savedAlerts.push(alert);
   }
-  return changed;
+
+  return savedAlerts;
 }

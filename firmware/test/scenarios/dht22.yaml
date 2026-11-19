@@ -16,9 +16,15 @@ steps:
   - set-control:
       part-id: dht
       name: humidity
-      value: 65
+      value: 75.4
   - wait-serial: 'Temperature: 31.5 C'
-  - wait-serial: 'Humidity: 65.0 %'
+  - wait-serial: 'Humidity: 75.4 %'
+  - wait-serial: 'STATUS: NORMAL'
+  - set-control:
+      part-id: dht
+      name: humidity
+      value: 75.5
+  - wait-serial: 'Humidity: 75.5 %'
   - wait-serial: 'ALARM: High humidity detected!'
   - set-control:
       part-id: dht

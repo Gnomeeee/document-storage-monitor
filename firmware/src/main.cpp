@@ -1,5 +1,7 @@
 #include <Arduino.h>
 #include <DHT.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <math.h>
 
 #include "config.h"
@@ -13,17 +15,35 @@ bool dhtValid = false;
 bool buzzerOn = false;
 bool previousWaterDetected = false;
 unsigned long lastSampleMs = 0;
+TaskHandle_t monitorTask = nullptr;
+
+void ARDUINO_ISR_ATTR onWaterChange() {
+  BaseType_t taskWoken = pdFALSE;
+  vTaskNotifyGiveFromISR(monitorTask, &taskWoken);
+  if (taskWoken == pdTRUE) {
+    portYIELD_FROM_ISR();
+  }
+}
+
+void setBuzzer(bool on) {
+#ifdef WOKWI_PASSIVE_BUZZER
+  if (on) {
+    tone(BUZZER_PIN, BUZZER_FREQUENCY_HZ);
+  } else {
+    noTone(BUZZER_PIN);
+    digitalWrite(BUZZER_PIN, LOW);
+  }
+#else
+  digitalWrite(BUZZER_PIN, on == BUZZER_ACTIVE_HIGH ? HIGH : LOW);
+#endif
+}
 
 void updateBuzzer(bool waterDetected) {
   bool highHumidity = dhtValid && humidityPercent >= HUMIDITY_THRESHOLD;
   bool alarmNeeded = waterDetected || highHumidity;
 
   if (alarmNeeded != buzzerOn) {
-    if (alarmNeeded) {
-      tone(BUZZER_PIN, BUZZER_FREQUENCY_HZ);
-    } else {
-      noTone(BUZZER_PIN);
-    }
+    setBuzzer(alarmNeeded);
     buzzerOn = alarmNeeded;
   }
 }
@@ -57,11 +77,22 @@ void printReadings(bool waterDetected) {
   }
 }
 
+void reportStatus(bool alwaysPrint) {
+  bool waterDetected = digitalRead(WATER_PIN) == LOW;
+  updateBuzzer(waterDetected);
+  if (alwaysPrint || waterDetected != previousWaterDetected) {
+    printReadings(waterDetected);
+  }
+  previousWaterDetected = waterDetected;
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(BUZZER_PIN, OUTPUT);
-  digitalWrite(BUZZER_PIN, LOW);
+  setBuzzer(false);
   pinMode(WATER_PIN, INPUT_PULLUP);
+  monitorTask = xTaskGetCurrentTaskHandle();
+  attachInterrupt(WATER_PIN, onWaterChange, CHANGE);
 
   dht.begin();
   lastSampleMs = millis();
@@ -73,43 +104,30 @@ void setup() {
                 static_cast<unsigned long>(getCpuFrequencyMhz()));
   Serial.println("System initialized!");
 
-  previousWaterDetected = digitalRead(WATER_PIN) == LOW;
-  updateBuzzer(previousWaterDetected);
-  printReadings(previousWaterDetected);
+  reportStatus(true);
 }
 
 void loop() {
-  bool waterDetected = digitalRead(WATER_PIN) == LOW;
-  updateBuzzer(waterDetected);
-
-  unsigned long now = millis();
+  reportStatus(false);
   unsigned long interval = hasSample ? DHT_SAMPLE_INTERVAL_MS : DHT_STARTUP_MS;
-  bool sampled = false;
-
-  if (now - lastSampleMs >= interval) {
-    humidityPercent = dht.readHumidity();
-
-    temperatureC = dht.readTemperature();
-    lastSampleMs = millis();
-    hasSample = true;
-    sampled = true;
-
-    dhtValid = isfinite(temperatureC) && isfinite(humidityPercent) &&
-               temperatureC >= -40.0f && temperatureC <= 80.0f &&
-               humidityPercent >= 0.0f && humidityPercent <= 100.0f;
-
-    if (!dhtValid) {
-      temperatureC = NAN;
-      humidityPercent = NAN;
-    }
+  unsigned long elapsed = millis() - lastSampleMs;
+  if (elapsed < interval) {
+    // A GPIO change wakes the task even while the next DHT sample is pending.
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(interval - elapsed));
+    return;
   }
 
-  waterDetected = digitalRead(WATER_PIN) == LOW;
-  updateBuzzer(waterDetected);
-  if (sampled || waterDetected != previousWaterDetected) {
-    printReadings(waterDetected);
-  }
-  previousWaterDetected = waterDetected;
+  humidityPercent = dht.readHumidity();
+  temperatureC = dht.readTemperature();
+  lastSampleMs = millis();
+  hasSample = true;
+  dhtValid = isfinite(temperatureC) && isfinite(humidityPercent) &&
+             temperatureC >= -40.0f && temperatureC <= 80.0f &&
+             humidityPercent >= 0.0f && humidityPercent <= 100.0f;
 
-  delay(LOOP_PAUSE_MS);
+  if (!dhtValid) {
+    temperatureC = NAN;
+    humidityPercent = NAN;
+  }
+  reportStatus(true);
 }

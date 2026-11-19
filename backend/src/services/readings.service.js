@@ -1,5 +1,6 @@
-import { AppError } from "../lib/errors.js";
-import { applyAlertChanges, defaultRules } from "./alerts.service.js";
+import { AppError } from "../utils/errors.js";
+import { applyAlertChanges } from "./alerts.service.js";
+import { defaultRules } from "../config/monitoring.js";
 
 export function createReadingService(
   prisma,
@@ -11,8 +12,7 @@ export function createReadingService(
         const devices =
           await tx.$queryRaw`SELECT "id", "isActive" FROM "Device" WHERE "deviceCode" = ${payload.deviceId} FOR UPDATE`;
         const device = devices[0];
-        if (!device)
-          throw new AppError("UNKNOWN_DEVICE", "Device is not registered.");
+        if (!device) throw new AppError("UNKNOWN_DEVICE", "Device is not registered.");
         if (!device.isActive)
           throw new AppError("INACTIVE_DEVICE", "Device is disabled.");
         if (payload.readingUid) {
@@ -58,7 +58,7 @@ export function createReadingService(
         const recent = await tx.sensorReading.findMany({
           where: {
             deviceId: device.id,
-            receivedAt: { gte: new Date(+now - lookback), lte: now },
+            receivedAt: { gte: new Date(now.getTime() - lookback), lte: now },
           },
           orderBy: [{ receivedAt: "desc" }, { id: "desc" }],
           take: 10000,

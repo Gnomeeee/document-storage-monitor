@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AppError } from "../lib/errors.js";
+import { AppError } from "../utils/errors.js";
 
 export const deviceCode = z
   .string()
@@ -19,10 +19,7 @@ export const readingSchema = z
 
 export function parseReading(topic, bytes, retained = false) {
   if (retained)
-    throw new AppError(
-      "RETAINED_READING",
-      "Retained telemetry is not accepted.",
-    );
+    throw new AppError("RETAINED_READING", "Retained telemetry is not accepted.");
   if (bytes.length > 4096)
     throw new AppError("INVALID_READING", "Reading exceeds the size limit.");
   let value;
@@ -35,10 +32,7 @@ export function parseReading(topic, bytes, retained = false) {
   if (!parsed.success)
     throw new AppError("INVALID_READING", "Invalid measurement fields.");
   if (topic !== `dsms/${parsed.data.deviceId}/readings`)
-    throw new AppError(
-      "DEVICE_MISMATCH",
-      "Topic and device identity do not match.",
-    );
+    throw new AppError("DEVICE_MISMATCH", "Topic and device identity do not match.");
   return parsed.data;
 }
 
