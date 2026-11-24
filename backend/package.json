@@ -9,6 +9,11 @@
     "start": "node src/server.js",
     "test:integration": "node --test tests/integration/*.test.js",
     "check": "node scripts/check.js",
+    "db:generate": "prisma generate --config prisma7.config.ts",
+    "db:validate": "prisma validate --config prisma7.config.ts",
+    "db:status": "prisma migrate status --config prisma7.config.ts",
+    "db:deploy": "prisma migrate deploy --config prisma7.config.ts",
+    "db:seed": "prisma db seed --config prisma7.config.ts",
     "bridge:usb": "node scripts/bridge-usb.js",
     "simulate": "node scripts/simulate-device.js"
   },
@@ -27,6 +32,11 @@
   "devDependencies": {
     "aedes": "^1.2.0",
     "prisma": "^7.10.1"
+  },
+  "overrides": {
+    "@prisma/config": {
+      "effect": "3.22.1"
+    }
   },
   "engines": {
     "node": ">=22.12.0"
